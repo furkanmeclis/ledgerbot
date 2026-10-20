@@ -50,6 +50,7 @@ type Totals struct {
 	CustomerDelta map[string]domain.Money // + increases what the customer owes
 	ProductSold   map[string]int64        // thousandths
 	Allocated     map[string]domain.Money // invoice number -> paid amount
+	Cash          domain.Money            // cash effect of collections, payments and expenses
 }
 
 func newTotals() Totals {
@@ -61,6 +62,14 @@ type world struct {
 	opening   map[string]domain.Money
 	products  []dataprovider.Product
 	overdue   []dataprovider.OverdueItem
+	cash      domain.Money
+	recurring []recurring
+}
+
+type recurring struct {
+	day    int
+	amount domain.Money
+	desc   string
 }
 
 // Provider is the fake driver.
@@ -149,6 +158,15 @@ func (p *Provider) world(c domain.CompanyID) *world {
 		})
 	}
 	slices.SortFunc(w.overdue, func(a, b dataprovider.OverdueItem) int { return a.DueDate.Compare(b.DueDate) })
+	w.cash = domain.Money((40_000 + r.IntN(160_000)) * 100)
+	w.recurring = []recurring{
+		{1, -domain.Money((60_000 + r.IntN(60_000)) * 100), "Personel maaşları"},
+		{5, -domain.Money((15_000 + r.IntN(25_000)) * 100), "Depo kirası"},
+		{12, -domain.Money((5_000 + r.IntN(10_000)) * 100), "SGK primleri"},
+		{20, -domain.Money((20_000 + r.IntN(80_000)) * 100), "Tedarikçi ödemesi"},
+		{26, -domain.Money((3_000 + r.IntN(7_000)) * 100), "KDV ödemesi"},
+		{15, domain.Money((30_000 + r.IntN(90_000)) * 100), "Bayi çekleri tahsilatı"},
+	}
 	p.mu.Lock()
 	if existing, ok := p.worlds[c]; ok {
 		w = existing
@@ -311,7 +329,21 @@ func (p *Provider) PeriodSummary(ctx context.Context, c domain.CompanyID, from, 
 // Commit translates a record into ledger entries. Sign convention: amounts on
 // customer rows increase what the customer owes.
 func (p *Provider) Commit(ctx context.Context, c domain.CompanyID, r dataprovider.Record) (string, error) {
+	entries, err := entriesFor(r)
+	if err != nil {
+		return "", err
+	}
 	now := p.now()
+	for i := range entries {
+		entries[i].DraftID, entries[i].CompanyID, entries[i].At = r.DraftID, c, now
+	}
+	if _, err := p.ledger.Append(ctx, r.DraftID, entries); err != nil {
+		return "", err
+	}
+	return "FAKE-" + r.DraftID, nil
+}
+
+func entriesFor(r dataprovider.Record) ([]Entry, error) {
 	var entries []Entry
 	switch r.Kind {
 	case dataprovider.RecordCollection:
@@ -329,17 +361,60 @@ func (p *Provider) Commit(ctx context.Context, c domain.CompanyID, r dataprovide
 			entries = append(entries, Entry{Kind: r.Kind, CustomerID: r.CustomerID, ProductID: l.ProductID, Amount: l.Total, VAT: vat, Quantity: l.Quantity})
 		}
 	case dataprovider.RecordCustom:
-		entries = append(entries, Entry{Kind: r.Kind, CustomerID: r.CustomerID, Amount: 0})
+		entries = append(entries, Entry{Kind: r.Kind, CustomerID: r.CustomerID})
+	case dataprovider.RecordBatch:
+		for _, it := range r.Items {
+			if it.Kind == dataprovider.RecordBatch {
+				return nil, fmt.Errorf("fake: nested batch")
+			}
+			es, err := entriesFor(it)
+			if err != nil {
+				return nil, err
+			}
+			entries = append(entries, es...)
+		}
 	default:
-		return "", fmt.Errorf("fake: unsupported record kind %q", r.Kind)
+		return nil, fmt.Errorf("fake: unsupported record kind %q", r.Kind)
 	}
-	for i := range entries {
-		entries[i].DraftID, entries[i].CompanyID, entries[i].At = r.DraftID, c, now
+	return entries, nil
+}
+
+// CashPosition = seeded opening cash + collections − payments − expenses.
+func (p *Provider) CashPosition(ctx context.Context, c domain.CompanyID) (domain.Money, error) {
+	w := p.world(c)
+	t, err := p.ledger.Totals(ctx, c)
+	if err != nil {
+		return 0, err
 	}
-	if _, err := p.ledger.Append(ctx, r.DraftID, entries); err != nil {
-		return "", err
+	return w.cash + t.Cash, nil
+}
+
+// Upcoming returns the seeded recurring payables and receivables until a date,
+// plus open (overdue) invoices expected within a week.
+func (p *Provider) Upcoming(ctx context.Context, c domain.CompanyID, until time.Time) ([]dataprovider.Due, error) {
+	w := p.world(c)
+	now := p.now()
+	var out []dataprovider.Due
+	for _, d := range w.recurring {
+		for m := 0; m < 3; m++ {
+			at := time.Date(now.Year(), now.Month()+time.Month(m), d.day, 9, 0, 0, 0, now.Location())
+			if at.After(now) && at.Before(until) {
+				out = append(out, dataprovider.Due{Date: at, Amount: d.amount, Description: d.desc})
+			}
+		}
 	}
-	return "FAKE-" + r.DraftID, nil
+	open, err := p.open(ctx, c, "")
+	if err != nil {
+		return nil, err
+	}
+	for i, it := range open {
+		at := now.AddDate(0, 0, 3+i%5) // collections expected within a week
+		if at.Before(until) {
+			out = append(out, dataprovider.Due{Date: at, Amount: it.Amount / 2, Description: it.CustomerName + " " + it.InvoiceNo + " (beklenen %50)"})
+		}
+	}
+	slices.SortFunc(out, func(a, b dataprovider.Due) int { return a.Date.Compare(b.Date) })
+	return out, nil
 }
 
 // Fold lowercases and strips Turkish diacritics for matching.
@@ -382,6 +457,7 @@ func (m *MemLedger) Totals(_ context.Context, c domain.CompanyID) (Totals, error
 			t.Allocated[e.Ref] += e.Amount
 			continue
 		}
+		t.Cash += cashEffect(e.Kind, e.Amount)
 		if e.CustomerID != "" {
 			t.CustomerDelta[e.CustomerID] += e.Amount
 		}
@@ -402,4 +478,15 @@ func (m *MemLedger) Range(_ context.Context, c domain.CompanyID, from, to time.T
 		}
 	}
 	return out, nil
+}
+
+// cashEffect maps a ledger row to its cash movement.
+func cashEffect(k dataprovider.RecordKind, amount domain.Money) domain.Money {
+	switch k {
+	case dataprovider.RecordCollection:
+		return -amount // stored as a decrease of what the customer owes
+	case dataprovider.RecordPayment, dataprovider.RecordExpense:
+		return -amount
+	}
+	return 0
 }

@@ -82,6 +82,17 @@ func DueReports(ctx context.Context, d *Deps, snap *tenant.Snapshot, now time.Ti
 		}
 		_, _, period := assistant.Period(r.Type, local)
 		var text string
+		if r.Type == assistant.ReportCashForecast {
+			f, err := assistant.ForecastCash(ctx, d.Data, c, local, 30)
+			if err != nil {
+				return nil, err
+			}
+			t, risky := assistant.CashText(f, lang)
+			if !risky {
+				continue // only warn when cash may go negative
+			}
+			text = t
+		}
 		for _, u := range snap.UsersWithRoles(r.Roles) {
 			ok, err := d.Store.ThrottleOnce(ctx, c, "report|"+r.Type+"|"+period+"|"+string(u.ID), 40*24*time.Hour)
 			if err != nil {
@@ -126,6 +137,8 @@ func due(r tenant.Report, local time.Time) bool {
 			wd = 5
 		}
 		return int(local.Weekday()) == wd%7
+	case assistant.ReportCashForecast:
+		return true // checked daily; sent only when risky
 	case assistant.ReportMonthly:
 		day := r.Day
 		if day < 1 || day > 28 {

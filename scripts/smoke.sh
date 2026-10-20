@@ -34,5 +34,8 @@ done
 expect 'Demir' "$out"
 echo "== reports";      out=$(post /v1/dev/messages '{"sender":"owner","text":"haftalık rapor"}'); expect 'Haftalık' "$out"
 out=$(post /v1/dev/messages '{"sender":"accountant","text":"KDV tahmini"}'); expect 'KDV' "$out"
+echo "== bank import";  csv=$(printf 'Tarih;Açıklama;Tutar\n01.10.2026;FAST GELEN AHMET YILMAZ;1.000,00\n02.10.2026;BILINMEYEN;-50,00\n' | base64)
+out=$(post /v1/dev/messages '{"sender":"owner","media":{"mime":"text/csv","filename":"ekstre.csv","data":"'"$csv"'"}}'); expect 'Banka ekstresi' "$out"
+echo "== cash forecast"; out=$(post /v1/dev/messages '{"sender":"owner","text":"nakit akışı"}'); expect 'akit' "$out"
 echo "== usage";        out=$(curl -fsS "$BASE/v1/usage" "${H[@]}"); expect total_calls "$out"
 echo "OK"
