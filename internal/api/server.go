@@ -6,7 +6,6 @@ package api
 import (
 	"bytes"
 	"context"
-	"crypto/hmac"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
@@ -31,8 +30,14 @@ import (
 	"github.com/furkanmeclis/ledgerbot/internal/metrics"
 	"github.com/furkanmeclis/ledgerbot/internal/queue"
 	"github.com/furkanmeclis/ledgerbot/internal/secretbox"
+	"github.com/furkanmeclis/ledgerbot/internal/sign"
 	"github.com/furkanmeclis/ledgerbot/internal/store"
+	"github.com/furkanmeclis/ledgerbot/internal/telemetry"
 	"github.com/furkanmeclis/ledgerbot/internal/tenant"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // Server holds the API dependencies.
@@ -178,12 +183,17 @@ func (w *statusWriter) Flush() {
 func (s *Server) observe(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
+		ctx := otel.GetTextMapPropagator().Extract(r.Context(), propagation.HeaderCarrier(r.Header))
+		ctx, span := telemetry.Tracer().Start(ctx, "http.request", trace.WithSpanKind(trace.SpanKindServer))
+		defer span.End()
 		sw := &statusWriter{ResponseWriter: w}
-		next.ServeHTTP(sw, r)
+		next.ServeHTTP(sw, r.WithContext(ctx))
 		route := chi.RouteContext(r.Context()).RoutePattern()
 		if route == "" {
 			route = "unmatched"
 		}
+		span.SetName(r.Method + " " + route)
+		span.SetAttributes(attribute.String("http.route", route), attribute.Int("http.response.status_code", sw.status))
 		metrics.HTTPRequests.WithLabelValues(route, r.Method, strconv.Itoa(sw.status/100)+"xx").Inc()
 		metrics.HTTPDuration.WithLabelValues(route).Observe(time.Since(start).Seconds())
 	})
@@ -264,29 +274,7 @@ func (s *Server) auth(next http.Handler) http.Handler {
 
 // VerifySignature checks "t=<unix>,v1=<hex hmac(secret, t + '.' + body)>".
 func VerifySignature(secret, header string, body []byte, now time.Time, skew time.Duration) bool {
-	var ts, sig string
-	for _, part := range strings.Split(header, ",") {
-		k, v, _ := strings.Cut(strings.TrimSpace(part), "=")
-		switch k {
-		case "t":
-			ts = v
-		case "v1":
-			sig = v
-		}
-	}
-	t, err := strconv.ParseInt(ts, 10, 64)
-	if err != nil || now.Sub(time.Unix(t, 0)).Abs() > skew {
-		return false
-	}
-	want, err := hex.DecodeString(sig)
-	if err != nil {
-		return false
-	}
-	mac := hmac.New(sha256.New, []byte(secret))
-	mac.Write([]byte(ts))
-	mac.Write([]byte{'.'})
-	mac.Write(body)
-	return hmac.Equal(want, mac.Sum(nil))
+	return sign.Verify(secret, header, body, now, skew)
 }
 
 func scope(name string) func(http.Handler) http.Handler {

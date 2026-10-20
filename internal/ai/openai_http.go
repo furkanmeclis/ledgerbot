@@ -11,7 +11,11 @@ import (
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/furkanmeclis/ledgerbot/internal/domain"
+	"github.com/furkanmeclis/ledgerbot/internal/telemetry"
 )
 
 // OpenAISTT calls an OpenAI-compatible /audio/transcriptions endpoint
@@ -55,6 +59,9 @@ func (s *OpenAISTT) Transcribe(ctx context.Context, audio domain.Media, lang str
 	if s.APIKey != "" {
 		req.Header.Set("Authorization", "Bearer "+s.APIKey)
 	}
+	ctx, span := telemetry.Tracer().Start(ctx, "stt.transcribe", trace.WithAttributes(attribute.String("gen_ai.system", s.Provider)))
+	defer span.End()
+	req = req.WithContext(ctx)
 	start := time.Now()
 	resp, err := s.Client.Do(req)
 	if err != nil {
@@ -121,6 +128,9 @@ func (e *OpenAIEmbedder) Embed(ctx context.Context, texts []string) ([][]float32
 	if e.APIKey != "" {
 		req.Header.Set("Authorization", "Bearer "+e.APIKey)
 	}
+	ctx, span := telemetry.Tracer().Start(ctx, "embeddings.create", trace.WithAttributes(attribute.String("gen_ai.system", e.Provider), attribute.Int("ledgerbot.texts", len(texts))))
+	defer span.End()
+	req = req.WithContext(ctx)
 	start := time.Now()
 	resp, err := e.Client.Do(req)
 	if err != nil {

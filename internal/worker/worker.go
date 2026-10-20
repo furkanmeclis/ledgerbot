@@ -29,6 +29,7 @@ import (
 	"github.com/furkanmeclis/ledgerbot/internal/rag"
 	"github.com/furkanmeclis/ledgerbot/internal/secretbox"
 	"github.com/furkanmeclis/ledgerbot/internal/store"
+	"github.com/furkanmeclis/ledgerbot/internal/telemetry"
 	"github.com/furkanmeclis/ledgerbot/internal/tenant"
 )
 
@@ -131,6 +132,8 @@ type inboundWorker struct {
 func (w *inboundWorker) Timeout(*river.Job[queue.InboundArgs]) time.Duration { return 3 * time.Minute }
 
 func (w *inboundWorker) Work(ctx context.Context, job *river.Job[queue.InboundArgs]) error {
+	ctx, span := telemetry.Tracer().Start(telemetry.Extract(ctx, job.Args.Trace), "job.inbound_message")
+	defer span.End()
 	msg := job.Args.Msg
 	if msg.CompanyID == "" {
 		c, err := w.route(ctx, msg)

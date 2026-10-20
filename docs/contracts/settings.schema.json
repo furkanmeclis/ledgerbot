@@ -213,6 +213,54 @@
           }
         }
       }
+    },
+    "plugins": {
+      "type": "array",
+      "description": "Company-specific capabilities served over HTTPS. ledgerbot POSTs {company_id, capability, actor{id,role,name}, args, text, language} signed with X-Ledgerbot-Signature and expects {text, summary?, record?}. Built-in names win; plugin names are capability names in the permission matrix (use an x_ prefix).",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "url"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^x_[a-z0-9_]+$"
+          },
+          "description": {
+            "type": "string"
+          },
+          "args": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "secret": {
+            "type": "string"
+          },
+          "write": {
+            "type": "boolean",
+            "description": "The plugin may return a record; the save mode applies and it is committed as kind 'custom' unless the record sets another kind."
+          },
+          "timeout_ms": {
+            "type": "integer",
+            "maximum": 30000
+          },
+          "patterns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Go regular expressions tried after built-in rules and before the LLM; named groups become args."
+          }
+        }
+      }
     }
   }
 }

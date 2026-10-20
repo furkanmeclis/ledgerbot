@@ -31,6 +31,7 @@ const (
 type InboundArgs struct {
 	Msg    domain.InboundMessage `json:"msg"`
 	BlobID string                `json:"blob_id,omitempty"`
+	Trace  map[string]string     `json:"trace,omitempty"` // W3C trace context of the request
 }
 
 func (InboundArgs) Kind() string { return "inbound_message" }

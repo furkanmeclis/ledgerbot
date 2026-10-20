@@ -328,6 +328,8 @@ func (p *Provider) Commit(ctx context.Context, c domain.CompanyID, r dataprovide
 			vat := l.Total - domain.Money(int64(l.Total)*100/int64(100+l.VATRate))
 			entries = append(entries, Entry{Kind: r.Kind, CustomerID: r.CustomerID, ProductID: l.ProductID, Amount: l.Total, VAT: vat, Quantity: l.Quantity})
 		}
+	case dataprovider.RecordCustom:
+		entries = append(entries, Entry{Kind: r.Kind, CustomerID: r.CustomerID, Amount: 0})
 	default:
 		return "", fmt.Errorf("fake: unsupported record kind %q", r.Kind)
 	}

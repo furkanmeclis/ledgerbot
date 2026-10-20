@@ -87,6 +87,7 @@ const (
 	RecordPayment    RecordKind = "payment"    // ödeme
 	RecordExpense    RecordKind = "expense"    // gider / alış faturası
 	RecordOrder      RecordKind = "order"      // B2B sipariş
+	RecordCustom     RecordKind = "custom"     // produced by a plugin capability
 )
 
 // Line is an item line on an expense or order.

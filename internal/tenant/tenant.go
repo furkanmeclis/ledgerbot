@@ -34,7 +34,20 @@ type Settings struct {
 	Rules        []Rule           `json:"rules,omitempty"`
 	Prompts      Prompts          `json:"prompts,omitzero"`
 	Reports      []Report         `json:"reports,omitempty"`
+	Plugins      []Plugin         `json:"plugins,omitempty"`
 	Timezone     string           `json:"timezone,omitempty"` // IANA, default Europe/Istanbul
+}
+
+// Plugin is a capability served over HTTPS by the host or a third party.
+type Plugin struct {
+	Name        string   `json:"name"` // also the permission-matrix capability name
+	Description string   `json:"description"`
+	Args        []string `json:"args,omitempty"`
+	URL         string   `json:"url"`
+	Secret      string   `json:"secret,omitempty"` // HMAC signing secret
+	Write       bool     `json:"write,omitempty"`  // may return a record (save mode applies)
+	TimeoutMS   int      `json:"timeout_ms,omitempty"`
+	Patterns    []string `json:"patterns,omitempty"` // Go regexps; named groups become args
 }
 
 // Report schedules a recurring report to users with the given roles.

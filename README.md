@@ -53,6 +53,8 @@ Real AI providers: copy `providers.example.json` to `providers.json`, set the AP
 | Intents | Deterministic Turkish/English rules first (≈2.5 µs, no cost); LLM fallback through LangChainGo (OpenAI, Anthropic, Ollama, and any OpenAI-compatible API such as Gemini, Groq, OpenRouter) |
 | Capabilities | collection, payment, expense (photo, PDF, UBL-TR XML via go-ubltr), B2B order, balance, statement, stock, low stock, overdue, daily summary, help; chained commands ("X ve Y") |
 | Reports & matching | Weekly P&L, monthly VAT estimate, morning digest (on demand or scheduled); collections matched to open invoices |
+| Extensibility | Per-company plugin capabilities over signed HTTPS, with regex triggers and the same permission and save-mode rules |
+| Observability | Prometheus metrics, OpenTelemetry traces across API → queue → assistant → AI (`docker compose --profile observability up` adds Jaeger on :16686) |
 | Memory | "her zamanki gibi" repeats the last record; notes and records searchable through pgvector RAG, isolated per company |
 | Save modes | `reply_only`, `ask_approval` (yes/no parsed without AI), `auto_save`; roles can only tighten; degraded settings never write |
 | Media | Item-level receipt extraction (vision model), e-invoice line items, voice notes through pluggable STT |

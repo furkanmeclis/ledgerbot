@@ -9,6 +9,10 @@ import (
 	"github.com/tmc/langchaingo/llms/anthropic"
 	"github.com/tmc/langchaingo/llms/ollama"
 	"github.com/tmc/langchaingo/llms/openai"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+
+	"github.com/furkanmeclis/ledgerbot/internal/telemetry"
 )
 
 // LangChainLLM adapts any langchaingo model to the LLM interface. OpenAI's
@@ -89,9 +93,13 @@ func (l *LangChainLLM) Complete(ctx context.Context, req CompletionRequest) (Com
 	if req.MaxTokens > 0 {
 		opts = append(opts, llms.WithMaxTokens(req.MaxTokens))
 	}
+	ctx, span := telemetry.Tracer().Start(ctx, "llm.complete", trace.WithAttributes(
+		attribute.String("gen_ai.system", l.Provider), attribute.String("gen_ai.request.model", l.ModelID)))
+	defer span.End()
 	start := time.Now()
 	resp, err := l.Model.GenerateContent(ctx, msgs, opts...)
 	if err != nil {
+		span.RecordError(err)
 		return Completion{}, err
 	}
 	if len(resp.Choices) == 0 {
@@ -101,6 +109,7 @@ func (l *LangChainLLM) Complete(ctx context.Context, req CompletionRequest) (Com
 	u := Usage{Provider: l.Provider, Model: l.ModelID, Latency: time.Since(start)}
 	u.InputTokens = intInfo(ch.GenerationInfo, "PromptTokens", "InputTokens", "prompt_tokens", "input_tokens")
 	u.OutputTokens = intInfo(ch.GenerationInfo, "CompletionTokens", "OutputTokens", "completion_tokens", "output_tokens")
+	span.SetAttributes(attribute.Int("gen_ai.usage.input_tokens", u.InputTokens), attribute.Int("gen_ai.usage.output_tokens", u.OutputTokens))
 	return Completion{Text: ch.Content, Usage: u}, nil
 }
 
