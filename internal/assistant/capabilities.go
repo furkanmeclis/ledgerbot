@@ -124,6 +124,7 @@ func builtins() []Capability {
 		{Name: "query_low_stock", Description: "List products below minimum stock", Run: runLowStock},
 		{Name: "query_overdue", Description: "List overdue receivables", Run: runOverdue},
 		{Name: "daily_summary", Description: "Today's sales, collections, payments and expenses", Run: runSummary},
+		{Name: "query_report", Description: "Weekly profit and loss, monthly VAT estimate or daily digest", Args: []string{"kind"}, Run: runReport},
 		{Name: "help", Description: "Explain what the assistant can do", Run: func(_ context.Context, _ *Engine, c *Call) (Outcome, error) {
 			return Outcome{Text: T(c.Lang, "help")}, nil
 		}},
@@ -205,8 +206,30 @@ func runCashMove(kind dataprovider.RecordKind) func(context.Context, *Engine, *C
 		method := methodOf(c)
 		summary := T(c.Lang, key, cu.Name, amt.String(), method) + note
 		rec := &dataprovider.Record{Kind: kind, CustomerID: cu.ID, Amount: amt, Method: method, Date: e.now(), Note: c.Msg.Text}
+		if kind == dataprovider.RecordCollection {
+			alloc, err := matchCollection(ctx, e, c.Actor.CompanyID, rec, c.Lang)
+			if err != nil {
+				return Outcome{}, err
+			}
+			summary += alloc
+		}
 		return Outcome{Record: rec, Summary: summary}, nil
 	}
+}
+
+// matchCollection allocates a collection to open invoices and returns the note.
+func matchCollection(ctx context.Context, e *Engine, company domain.CompanyID, rec *dataprovider.Record, lang string) (string, error) {
+	open, err := e.Data.OpenInvoices(ctx, company, rec.CustomerID)
+	if err != nil {
+		return "", err
+	}
+	byNo := make(map[string]domain.Money, len(open))
+	for _, inv := range open {
+		byNo[inv.InvoiceNo] = inv.Amount
+	}
+	allocs, advance := allocate(open, rec.Amount)
+	rec.Allocations = allocs
+	return allocationNote(lang, allocs, byNo, advance), nil
 }
 
 func runOrder(ctx context.Context, e *Engine, c *Call) (Outcome, error) {

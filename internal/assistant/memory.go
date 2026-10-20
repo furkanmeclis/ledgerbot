@@ -68,6 +68,15 @@ func runRepeatLast(ctx context.Context, e *Engine, c *Call) (Outcome, error) {
 		rec.Lines = nil // a new total no longer matches the old item lines
 		summary = strings.Replace(summary, old.String(), amt.String(), 1) + note
 	}
+	if rec.Kind == dataprovider.RecordCollection {
+		rec.Allocations = nil
+		summary, _, _ = strings.Cut(summary, "\n") // drop the old allocation lines
+		note, err := matchCollection(ctx, e, c.Actor.CompanyID, &rec, c.Lang)
+		if err != nil {
+			return Outcome{}, err
+		}
+		summary += note
+	}
 	return Outcome{Record: &rec, Summary: T(c.Lang, "repeat_prefix") + summary, Capability: last.Capability}, nil
 }
 

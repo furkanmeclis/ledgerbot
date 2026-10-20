@@ -4,23 +4,50 @@
   "title": "Company settings",
   "description": "Per-company configuration served by the host. ledgerbot caches it (LEDGERBOT_TENANT_TTL) and refreshes on a settings.changed event. If the host is unreachable ledgerbot serves the last snapshot in degraded mode, where nothing is written.",
   "type": "object",
-  "required": ["save_mode"],
+  "required": [
+    "save_mode"
+  ],
   "properties": {
-    "company_id": { "type": "string" },
-    "version": { "type": "integer", "description": "Monotonic version for change detection." },
+    "company_id": {
+      "type": "string"
+    },
+    "version": {
+      "type": "integer",
+      "description": "Monotonic version for change detection."
+    },
     "save_mode": {
-      "enum": ["reply_only", "ask_approval", "auto_save"],
+      "enum": [
+        "reply_only",
+        "ask_approval",
+        "auto_save"
+      ],
       "description": "Most permissive mode allowed for the company. Roles may only make it stricter."
     },
-    "locale": { "type": "string", "examples": ["tr-TR", "en-US"] },
-    "ai_daily_limit": { "type": "integer", "minimum": 0, "description": "AI calls per day; 0 = unlimited. Rule-based commands and e-invoice XML do not count." },
+    "locale": {
+      "type": "string",
+      "examples": [
+        "tr-TR",
+        "en-US"
+      ]
+    },
+    "ai_daily_limit": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "AI calls per day; 0 = unlimited. Rule-based commands and e-invoice XML do not count."
+    },
     "providers": {
       "type": "object",
       "description": "Optional provider profile names (from the deployment's providers file) per purpose.",
       "properties": {
-        "agent": { "type": "string" },
-        "extraction": { "type": "string" },
-        "stt": { "type": "string" }
+        "agent": {
+          "type": "string"
+        },
+        "extraction": {
+          "type": "string"
+        },
+        "stt": {
+          "type": "string"
+        }
       },
       "additionalProperties": false
     },
@@ -28,24 +55,66 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["id", "sha256"],
+        "required": [
+          "id",
+          "sha256"
+        ],
         "properties": {
-          "id": { "type": "string" },
-          "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "Hex SHA-256 of the full key lb_<company>_<secret>." },
-          "scopes": { "type": "array", "items": { "enum": ["*", "messages", "drafts", "channels", "events", "usage", "audit", "deletion", "dev"] } }
+          "id": {
+            "type": "string"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "description": "Hex SHA-256 of the full key lb_<company>_<secret>."
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "enum": [
+                "*",
+                "messages",
+                "drafts",
+                "channels",
+                "events",
+                "usage",
+                "audit",
+                "deletion",
+                "dev"
+              ]
+            }
+          }
         }
       }
     },
-    "signing_secret": { "type": "string", "description": "If set, REST calls must be HMAC-signed (X-Ledgerbot-Signature)." },
+    "signing_secret": {
+      "type": "string",
+      "description": "If set, REST calls must be HMAC-signed (X-Ledgerbot-Signature)."
+    },
     "webhooks": {
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["url", "secret", "events"],
+        "required": [
+          "url",
+          "secret",
+          "events"
+        ],
         "properties": {
-          "url": { "type": "string", "format": "uri" },
-          "secret": { "type": "string" },
-          "events": { "type": "array", "items": { "type": "string" }, "description": "Glob patterns, e.g. draft.*, message.handled, *" }
+          "url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "secret": {
+            "type": "string"
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Glob patterns, e.g. draft.*, message.handled, *"
+          }
         }
       }
     },
@@ -54,11 +123,32 @@
       "description": "Proactive alerts: when an inbound event matches, notify users with these roles on their preferred connected channel.",
       "items": {
         "type": "object",
-        "required": ["event", "notify_roles"],
+        "required": [
+          "event",
+          "notify_roles"
+        ],
         "properties": {
-          "event": { "type": "string", "examples": ["stock.low", "invoice.overdue", "payment.received"] },
-          "notify_roles": { "type": "array", "items": { "type": "string" } },
-          "throttle": { "type": "string", "description": "Go duration; at most one alert per entity and user within it.", "examples": ["6h"] }
+          "event": {
+            "type": "string",
+            "examples": [
+              "stock.low",
+              "invoice.overdue",
+              "payment.received"
+            ]
+          },
+          "notify_roles": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "throttle": {
+            "type": "string",
+            "description": "Go duration; at most one alert per entity and user within it.",
+            "examples": [
+              "6h"
+            ]
+          }
         }
       }
     },
@@ -66,8 +156,62 @@
       "type": "object",
       "description": "Host-provided system instructions appended to ledgerbot's fixed prompt. They add context (sector, tone, vocabulary); they cannot change the output contract.",
       "properties": {
-        "system": { "type": "string" },
-        "roles": { "type": "object", "additionalProperties": { "type": "string" } }
+        "system": {
+          "type": "string"
+        },
+        "roles": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "timezone": {
+      "type": "string",
+      "description": "IANA time zone for scheduled reports (default Europe/Istanbul)."
+    },
+    "reports": {
+      "type": "array",
+      "description": "Scheduled reports sent to users with the given roles, once per period.",
+      "items": {
+        "type": "object",
+        "required": [
+          "type",
+          "roles"
+        ],
+        "properties": {
+          "type": {
+            "enum": [
+              "daily_digest",
+              "weekly_pnl",
+              "monthly_vat"
+            ]
+          },
+          "at": {
+            "type": "string",
+            "pattern": "^[0-2][0-9]:[0-5][0-9]$",
+            "description": "Local send time (default 08:30)."
+          },
+          "weekday": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 7,
+            "description": "weekly_pnl: 1 = Monday ... 7 = Sunday (default 5)."
+          },
+          "day": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 28,
+            "description": "monthly_vat: day of month (default 25)."
+          },
+          "roles": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
       }
     }
   }

@@ -18,6 +18,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	_ "time/tzdata" // the distroless image has no zoneinfo
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -179,13 +180,14 @@ func build(cfg config.Config, db *pgxpool.Pool, log *slog.Logger, withWorkers bo
 	var src tenant.Source
 	var dir tenant.Directory
 	var simCompanies func() ([]domain.CompanyID, error)
+	var lister tenant.Lister
 	switch cfg.TenantSource {
 	case "http":
 		h := &tenant.HTTPSource{Base: cfg.HostAPIURL, Token: cfg.HostAPIToken}
-		src, dir = h, h
+		src, dir, lister = h, h, h
 	default:
 		f := &tenant.FileSource{Dir: cfg.SeedDir}
-		src, dir, simCompanies = f, f, f.Companies
+		src, dir, lister, simCompanies = f, f, f, f.Companies
 	}
 	tenants := tenant.NewCache(src, cfg.TenantTTL, log)
 
@@ -247,7 +249,7 @@ func build(cfg config.Config, db *pgxpool.Pool, log *slog.Logger, withWorkers bo
 	}
 	deps := &worker.Deps{
 		Engine: engine, Channels: chans, Dev: dev, Store: st, Box: box, Tenants: tenants, Directory: dir,
-		Queue: q, Data: data, Log: log, PerCompanyInflight: cfg.PerCompanyInflight, SimCompanies: simCompanies, Knowledge: index,
+		Queue: q, Data: data, Log: log, PerCompanyInflight: cfg.PerCompanyInflight, SimCompanies: simCompanies, Knowledge: index, Companies: lister,
 	}
 	// Workers must be registered even in api mode so inserts validate job kinds.
 	worker.Register(workers, deps)

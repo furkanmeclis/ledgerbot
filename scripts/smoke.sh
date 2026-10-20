@@ -32,5 +32,7 @@ for i in $(seq 1 30); do
   grep -q 'Demir' <<<"$out" && break; sleep 1
 done
 expect 'Demir' "$out"
+echo "== reports";      out=$(post /v1/dev/messages '{"sender":"owner","text":"haftalık rapor"}'); expect 'Haftalık' "$out"
+out=$(post /v1/dev/messages '{"sender":"accountant","text":"KDV tahmini"}'); expect 'KDV' "$out"
 echo "== usage";        out=$(curl -fsS "$BASE/v1/usage" "${H[@]}"); expect total_calls "$out"
 echo "OK"

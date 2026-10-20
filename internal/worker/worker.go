@@ -48,6 +48,8 @@ type Deps struct {
 	PerCompanyInflight int
 	// Knowledge is the RAG index (nil disables indexing jobs).
 	Knowledge rag.Index
+	// Companies enumerates tenants for scheduled reports (nil disables them).
+	Companies tenant.Lister
 	// SimCompanies lists companies the simulator drives.
 	SimCompanies func() ([]domain.CompanyID, error)
 }
@@ -63,6 +65,7 @@ func Register(ws *river.Workers, d *Deps) {
 	river.AddWorker(ws, &simulateWorker{d: d})
 	river.AddWorker(ws, &cleanupWorker{d: d})
 	river.AddWorker(ws, &ragWorker{d: d})
+	river.AddWorker(ws, &reportsWorker{d: d})
 }
 
 // PeriodicJobs returns the scheduled jobs (run once cluster-wide by the leader).
@@ -70,6 +73,9 @@ func PeriodicJobs(simulate time.Duration) []*river.PeriodicJob {
 	jobs := []*river.PeriodicJob{
 		river.NewPeriodicJob(river.PeriodicInterval(10*time.Minute), func() (river.JobArgs, *river.InsertOpts) {
 			return queue.CleanupArgs{}, nil
+		}, &river.PeriodicJobOpts{RunOnStart: true}),
+		river.NewPeriodicJob(river.PeriodicInterval(5*time.Minute), func() (river.JobArgs, *river.InsertOpts) {
+			return queue.ReportsTickArgs{}, nil
 		}, &river.PeriodicJobOpts{RunOnStart: true}),
 	}
 	if simulate > 0 {

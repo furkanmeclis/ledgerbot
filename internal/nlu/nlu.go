@@ -243,6 +243,10 @@ var rules = []rule{
 	{"query_stock", regexp.MustCompile(`(?i)^(.+?)\s+(?:stok(?:u|ta)?|stock)(?:\s+(?:ne kadar|kaç|var m[ıi]|durumu))?\??$`), []string{"product"}},
 	// overdue
 	{"query_overdue", regexp.MustCompile(`(?i)(?:vadesi\s+geçen|vadesi\s+gecen|geciken\s+(?:alacak|ödeme|fatura)|overdue)`), nil},
+	// reports
+	{"query_report", regexp.MustCompile(`(?i)(?:haftalık\s+(?:rapor|kâr|kar)|kâr\s*(?:-|ve)?\s*zarar|kar\s*(?:-|ve)?\s*zarar|weekly\s+(?:report|p&l|pnl))`), nil},
+	{"query_report", regexp.MustCompile(`(?i)(?:kdv\s+(?:tahmini|durumu|raporu)|aylık\s+kdv|ne\s+kadar\s+kdv|vat\s+estimate)`), nil},
+	{"query_report", regexp.MustCompile(`(?i)(?:sabah\s+özeti|günlük\s+rapor|dünün\s+özeti|daily\s+digest)`), nil},
 	// summary
 	{"daily_summary", regexp.MustCompile(`(?i)(?:gün\s*sonu|günün\s+özeti|bugünün\s+özeti|günlük\s+özet|bugün\s+ne\s+sattık|kasa\s+durumu|daily\s+summary|today'?s\s+summary)`), nil},
 	// help
@@ -292,7 +296,21 @@ func matchOne(text string) (Intent, bool) {
 				in.Args[name] = v
 			}
 		}
+		if r.cap == "query_report" {
+			in.Args["kind"] = reportKind(text)
+		}
 		return in, true
 	}
 	return Intent{}, false
+}
+
+func reportKind(text string) string {
+	t := strings.ToLower(text)
+	switch {
+	case strings.Contains(t, "kdv") || strings.Contains(t, "vat"):
+		return "monthly_vat"
+	case strings.Contains(t, "sabah") || strings.Contains(t, "günlük") || strings.Contains(t, "dünün") || strings.Contains(t, "daily"):
+		return "daily_digest"
+	}
+	return "weekly_pnl"
 }

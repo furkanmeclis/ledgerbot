@@ -140,6 +140,33 @@ func (d *Driver) DailySummary(ctx context.Context, c domain.CompanyID, day time.
 	return raw.Summary, err
 }
 
+func (d *Driver) PeriodSummary(ctx context.Context, c domain.CompanyID, from, to time.Time) (dataprovider.Summary, error) {
+	var raw struct {
+		dataprovider.Summary
+		Day string `json:"day"`
+		To  string `json:"to"`
+	}
+	err := d.do(ctx, http.MethodGet, cpath(c, "/summary"), url.Values{"from": {from.Format("2006-01-02")}, "to": {to.Format("2006-01-02")}}, nil, &raw, "")
+	raw.Summary.Day, raw.Summary.To = from, to
+	return raw.Summary, err
+}
+
+func (d *Driver) OpenInvoices(ctx context.Context, c domain.CompanyID, customerID string) ([]dataprovider.OverdueItem, error) {
+	var raw []struct {
+		dataprovider.OverdueItem
+		Due string `json:"due_date"`
+	}
+	if err := d.do(ctx, http.MethodGet, cpath(c, "/customers/"+url.PathEscape(customerID)+"/invoices/open"), nil, nil, &raw, ""); err != nil {
+		return nil, err
+	}
+	out := make([]dataprovider.OverdueItem, len(raw))
+	for i, r := range raw {
+		out[i] = r.OverdueItem
+		out[i].DueDate, _ = time.Parse("2006-01-02", r.Due)
+	}
+	return out, nil
+}
+
 func (d *Driver) Commit(ctx context.Context, c domain.CompanyID, r dataprovider.Record) (string, error) {
 	var out struct {
 		ExternalID string `json:"external_id"`

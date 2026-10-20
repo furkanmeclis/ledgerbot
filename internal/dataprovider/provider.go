@@ -62,12 +62,21 @@ type OverdueItem struct {
 
 // Summary is a daily overview.
 type Summary struct {
-	Day         time.Time    `json:"day"`
-	Sales       domain.Money `json:"sales"`
+	Day         time.Time    `json:"day"`         // period start
+	To          time.Time    `json:"to,omitzero"` // period end (exclusive); zero for a single day
+	Sales       domain.Money `json:"sales"`       // gross, VAT included
 	Collections domain.Money `json:"collections"`
 	Payments    domain.Money `json:"payments"`
-	Expenses    domain.Money `json:"expenses"`
+	Expenses    domain.Money `json:"expenses"`   // gross, VAT included
+	OutputVAT   domain.Money `json:"output_vat"` // VAT on sales (hesaplanan KDV)
+	InputVAT    domain.Money `json:"input_vat"`  // VAT on expenses (indirilecek KDV)
 	Orders      int          `json:"orders"`
+}
+
+// Allocation closes (part of) an open invoice with a collection.
+type Allocation struct {
+	InvoiceNo string       `json:"invoice_no"`
+	Amount    domain.Money `json:"amount"`
 }
 
 // RecordKind names a write operation.
@@ -93,19 +102,21 @@ type Line struct {
 
 // Record is a write request. Exactly the fields relevant to Kind are set.
 type Record struct {
-	Kind       RecordKind    `json:"kind"`
-	CustomerID string        `json:"customer_id,omitempty"`
-	Vendor     string        `json:"vendor,omitempty"`
-	VendorTax  string        `json:"vendor_tax_id,omitempty"`
-	DocumentNo string        `json:"document_no,omitempty"`
-	Date       time.Time     `json:"date"`
-	Method     string        `json:"method,omitempty"` // nakit, havale, kart, çek
-	Amount     domain.Money  `json:"amount"`
-	VAT        domain.Money  `json:"vat,omitempty"`
-	Lines      []Line        `json:"lines,omitempty"`
-	Note       string        `json:"note,omitempty"`
-	ActorID    domain.UserID `json:"actor_id"`
-	DraftID    string        `json:"draft_id"` // idempotency key towards the host
+	Kind       RecordKind   `json:"kind"`
+	CustomerID string       `json:"customer_id,omitempty"`
+	Vendor     string       `json:"vendor,omitempty"`
+	VendorTax  string       `json:"vendor_tax_id,omitempty"`
+	DocumentNo string       `json:"document_no,omitempty"`
+	Date       time.Time    `json:"date"`
+	Method     string       `json:"method,omitempty"` // nakit, havale, kart, çek
+	Amount     domain.Money `json:"amount"`
+	VAT        domain.Money `json:"vat,omitempty"`
+	Lines      []Line       `json:"lines,omitempty"`
+	Note       string       `json:"note,omitempty"`
+	// Allocations match a collection to open invoices (computed by ledgerbot).
+	Allocations []Allocation  `json:"allocations,omitempty"`
+	ActorID     domain.UserID `json:"actor_id"`
+	DraftID     string        `json:"draft_id"` // idempotency key towards the host
 }
 
 // Provider is the data contract.
@@ -116,6 +127,10 @@ type Provider interface {
 	FindProducts(ctx context.Context, c domain.CompanyID, query string, limit int) ([]Product, error)
 	LowStock(ctx context.Context, c domain.CompanyID) ([]Product, error)
 	DailySummary(ctx context.Context, c domain.CompanyID, day time.Time) (Summary, error)
+	// PeriodSummary aggregates [from, to).
+	PeriodSummary(ctx context.Context, c domain.CompanyID, from, to time.Time) (Summary, error)
+	// OpenInvoices lists a customer's unpaid invoices, oldest due date first.
+	OpenInvoices(ctx context.Context, c domain.CompanyID, customerID string) ([]OverdueItem, error)
 	// Commit writes a record. It must be idempotent on Record.DraftID.
 	Commit(ctx context.Context, c domain.CompanyID, r Record) (externalID string, err error)
 }

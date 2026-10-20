@@ -26,10 +26,10 @@ func (l PGLedger) Append(ctx context.Context, draftID string, es []Entry) (bool,
 	}
 	rows := make([][]any, len(es))
 	for i, e := range es {
-		rows[i] = []any{e.DraftID, string(e.CompanyID), string(e.Kind), e.CustomerID, e.ProductID, int64(e.Amount), e.Quantity, e.At}
+		rows[i] = []any{e.DraftID, string(e.CompanyID), string(e.Kind), e.CustomerID, e.ProductID, int64(e.Amount), int64(e.VAT), e.Quantity, e.Ref, e.At}
 	}
 	if _, err := tx.CopyFrom(ctx, pgx.Identifier{"fake_ledger"},
-		[]string{"draft_id", "company_id", "kind", "customer_id", "product_id", "amount", "quantity", "at"},
+		[]string{"draft_id", "company_id", "kind", "customer_id", "product_id", "amount", "vat", "quantity", "ref", "at"},
 		pgx.CopyFromRows(rows)); err != nil {
 		return false, err
 	}
@@ -37,20 +37,25 @@ func (l PGLedger) Append(ctx context.Context, draftID string, es []Entry) (bool,
 }
 
 func (l PGLedger) Totals(ctx context.Context, c domain.CompanyID) (Totals, error) {
-	t := Totals{CustomerDelta: map[string]domain.Money{}, ProductSold: map[string]int64{}}
+	t := newTotals()
 	rows, err := l.DB.Query(ctx, `
-		SELECT customer_id, product_id, SUM(amount), SUM(quantity)
+		SELECT kind = 'allocation', customer_id, product_id, ref, SUM(amount), SUM(quantity)
 		FROM fake_ledger WHERE company_id = $1
-		GROUP BY customer_id, product_id`, string(c))
+		GROUP BY kind = 'allocation', customer_id, product_id, ref`, string(c))
 	if err != nil {
 		return t, err
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var cust, prod string
+		var alloc bool
+		var cust, prod, ref string
 		var amt, qty int64
-		if err := rows.Scan(&cust, &prod, &amt, &qty); err != nil {
+		if err := rows.Scan(&alloc, &cust, &prod, &ref, &amt, &qty); err != nil {
 			return t, err
+		}
+		if alloc {
+			t.Allocated[ref] += domain.Money(amt)
+			continue
 		}
 		if cust != "" {
 			t.CustomerDelta[cust] += domain.Money(amt)
@@ -62,11 +67,10 @@ func (l PGLedger) Totals(ctx context.Context, c domain.CompanyID) (Totals, error
 	return t, rows.Err()
 }
 
-func (l PGLedger) Day(ctx context.Context, c domain.CompanyID, day time.Time) ([]Entry, error) {
-	start := time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, day.Location())
+func (l PGLedger) Range(ctx context.Context, c domain.CompanyID, from, to time.Time) ([]Entry, error) {
 	rows, err := l.DB.Query(ctx, `
-		SELECT draft_id, kind, customer_id, product_id, amount, quantity, at
-		FROM fake_ledger WHERE company_id = $1 AND at >= $2 AND at < $3`, string(c), start, start.Add(24*time.Hour))
+		SELECT draft_id, kind, customer_id, product_id, amount, vat, quantity, ref, at
+		FROM fake_ledger WHERE company_id = $1 AND at >= $2 AND at < $3`, string(c), from, to)
 	if err != nil {
 		return nil, err
 	}
@@ -75,11 +79,11 @@ func (l PGLedger) Day(ctx context.Context, c domain.CompanyID, day time.Time) ([
 	for rows.Next() {
 		var e Entry
 		var kind string
-		var amt int64
-		if err := rows.Scan(&e.DraftID, &kind, &e.CustomerID, &e.ProductID, &amt, &e.Quantity, &e.At); err != nil {
+		var amt, vat int64
+		if err := rows.Scan(&e.DraftID, &kind, &e.CustomerID, &e.ProductID, &amt, &vat, &e.Quantity, &e.Ref, &e.At); err != nil {
 			return nil, err
 		}
-		e.CompanyID, e.Kind, e.Amount = c, dataprovider.RecordKind(kind), domain.Money(amt)
+		e.CompanyID, e.Kind, e.Amount, e.VAT = c, dataprovider.RecordKind(kind), domain.Money(amt), domain.Money(vat)
 		out = append(out, e)
 	}
 	return out, rows.Err()
