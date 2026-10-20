@@ -1,9 +1,16 @@
 name: CI
 
+# Runner selection: repository variable CI_RUNS_ON (JSON).
+#   self-hosted Mac (default when unset): ["self-hosted","ledgerbot"]
+#   GitHub-hosted:  gh variable set CI_RUNS_ON --body '"ubuntu-latest"'
+# Jobs avoid `services:` (Linux-only) and start their own containers, so the same
+# workflow runs on macOS and Linux runners. Setup: scripts/setup-runner.sh.
+
 on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -11,7 +18,7 @@ concurrency:
 
 jobs:
   lint:
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(vars.CI_RUNS_ON || '["self-hosted","ledgerbot"]') }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -26,52 +33,68 @@ jobs:
           version: v2.5.0
 
   test:
-    runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: pgvector/pgvector:pg17
-        env:
-          POSTGRES_USER: ledgerbot
-          POSTGRES_PASSWORD: ledgerbot
-          POSTGRES_DB: ledgerbot_test
-        ports: ["5432:5432"]
-        options: >-
-          --health-cmd "pg_isready -U ledgerbot" --health-interval 2s --health-timeout 3s --health-retries 30
+    runs-on: ${{ fromJSON(vars.CI_RUNS_ON || '["self-hosted","ledgerbot"]') }}
     env:
-      LEDGERBOT_TEST_DATABASE_URL: postgres://ledgerbot:ledgerbot@localhost:5432/ledgerbot_test?sslmode=disable
+      PG_NAME: ledgerbot-ci-pg-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      - name: Start PostgreSQL (pgvector)
+        run: |
+          PORT=$((55000 + RANDOM % 900))
+          echo "PG_PORT=$PORT" >> "$GITHUB_ENV"
+          docker run -d --rm --name "$PG_NAME" -e POSTGRES_USER=ledgerbot -e POSTGRES_PASSWORD=ledgerbot \
+            -e POSTGRES_DB=ledgerbot_test -p "127.0.0.1:$PORT:5432" pgvector/pgvector:pg17
+          for i in $(seq 1 60); do docker exec "$PG_NAME" pg_isready -U ledgerbot >/dev/null 2>&1 && break; sleep 1; done
       - name: Test (race, coverage)
-        run: go test -race -coverprofile=coverage.out ./...
+        run: |
+          export LEDGERBOT_TEST_DATABASE_URL="postgres://ledgerbot:ledgerbot@127.0.0.1:$PG_PORT/ledgerbot_test?sslmode=disable"
+          go test -race -coverprofile=coverage.out ./...
       - name: Coverage summary
         run: go tool cover -func=coverage.out | tail -1
       - name: Benchmarks (smoke)
         run: go test -run '^$' -bench . -benchtime 200x ./internal/domain ./internal/nlu ./internal/einvoice ./internal/assistant
       - name: govulncheck
         run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+      - name: Stop PostgreSQL
+        if: always()
+        run: docker rm -f "$PG_NAME" >/dev/null 2>&1 || true
 
   e2e:
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(vars.CI_RUNS_ON || '["self-hosted","ledgerbot"]') }}
     needs: [lint, test]
+    env:
+      COMPOSE_PROJECT_NAME: ledgerbot-ci-${{ github.run_id }}
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Pick free ports
+        run: |
+          echo "LEDGERBOT_PORT=$((18000 + RANDOM % 900))" >> "$GITHUB_ENV"
+          echo "LEDGERBOT_PG_PORT=$((56000 + RANDOM % 900))" >> "$GITHUB_ENV"
+          if [ "$RUNNER_OS" = "macOS" ]; then echo "K6_HOST=host.docker.internal" >> "$GITHUB_ENV"; else echo "K6_HOST=127.0.0.1" >> "$GITHUB_ENV"; fi
       - name: Start stack
         run: |
           cp .env.example .env
-          docker compose up -d --build --wait --wait-timeout 180 postgres migrate api worker gateway || true
-          for i in $(seq 1 60); do curl -fsS localhost:8080/readyz && break; sleep 2; done
+          docker compose up -d --build
+          for i in $(seq 1 90); do curl -fsS "localhost:$LEDGERBOT_PORT/readyz" && break; sleep 2; done
       - name: Smoke test
-        run: ./scripts/smoke.sh
-      - name: Load test (smoke, 200 companies)
+        run: BASE_URL="http://localhost:$LEDGERBOT_PORT" ./scripts/smoke.sh
+      - name: Load test (200 companies)
         run: |
           go run ./cmd/seedgen -n 200 -out loadtest/seed
           docker compose -f compose.yml -f loadtest/compose.loadtest.yml up -d api worker
-          for i in $(seq 1 60); do curl -fsS localhost:8080/readyz && break; sleep 2; done
-          docker run --rm --network host -v "$PWD/loadtest:/scripts" grafana/k6:1.3.0 run -q \
-            -e COMPANIES=200 -e VUS=20 -e DURATION=20s /scripts/k6.js
+          for i in $(seq 1 90); do curl -fsS "localhost:$LEDGERBOT_PORT/readyz" && break; sleep 2; done
+          NET=""; [ "$RUNNER_OS" = "Linux" ] && NET="--network host"
+          docker run --rm $NET -v "$PWD/loadtest:/scripts" grafana/k6:1.3.0 run -q \
+            -e BASE_URL="http://$K6_HOST:$LEDGERBOT_PORT" -e COMPANIES=200 -e VUS=20 -e DURATION=20s /scripts/k6.js
       - name: Logs on failure
         if: failure()
         run: docker compose logs --tail 200
+      - name: Tear down
+        if: always()
+        run: docker compose -f compose.yml -f loadtest/compose.loadtest.yml down -v --remove-orphans || true
