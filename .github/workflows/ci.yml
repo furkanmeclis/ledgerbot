@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: gofmt
+        run: test -z "$(gofmt -l .)" || (gofmt -l . && exit 1)
+      - name: go vet
+        run: go vet ./...
+      - uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.5.0
+
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: ledgerbot
+          POSTGRES_PASSWORD: ledgerbot
+          POSTGRES_DB: ledgerbot_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U ledgerbot" --health-interval 2s --health-timeout 3s --health-retries 30
+    env:
+      LEDGERBOT_TEST_DATABASE_URL: postgres://ledgerbot:ledgerbot@localhost:5432/ledgerbot_test?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Test (race, coverage)
+        run: go test -race -coverprofile=coverage.out ./...
+      - name: Coverage summary
+        run: go tool cover -func=coverage.out | tail -1
+      - name: Benchmarks (smoke)
+        run: go test -run '^$' -bench . -benchtime 200x ./internal/domain ./internal/nlu ./internal/einvoice ./internal/assistant
+      - name: govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
+  e2e:
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start stack
+        run: |
+          cp .env.example .env
+          docker compose up -d --build --wait --wait-timeout 180 postgres migrate api worker gateway || true
+          for i in $(seq 1 60); do curl -fsS localhost:8080/readyz && break; sleep 2; done
+      - name: Smoke test
+        run: ./scripts/smoke.sh
+      - name: Load test (smoke, 200 companies)
+        run: |
+          go run ./cmd/seedgen -n 200 -out loadtest/seed
+          docker compose -f compose.yml -f loadtest/compose.loadtest.yml up -d api worker
+          for i in $(seq 1 60); do curl -fsS localhost:8080/readyz && break; sleep 2; done
+          docker run --rm --network host -v "$PWD/loadtest:/scripts" grafana/k6:1.3.0 run -q \
+            -e COMPANIES=200 -e VUS=20 -e DURATION=20s /scripts/k6.js
+      - name: Logs on failure
+        if: failure()
+        run: docker compose logs --tail 200

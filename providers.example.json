@@ -1,0 +1,24 @@
+{
+  "profiles": [
+    { "name": "openai-mini", "kind": "llm", "provider": "openai", "model": "gpt-4.1-mini", "api_key_env": "OPENAI_API_KEY",
+      "input_price_per_mtok": 0.4, "output_price_per_mtok": 1.6 },
+    { "name": "claude", "kind": "llm", "provider": "anthropic", "model": "claude-sonnet-5-5", "api_key_env": "ANTHROPIC_API_KEY",
+      "input_price_per_mtok": 3, "output_price_per_mtok": 15 },
+    { "name": "gemini-flash", "kind": "llm", "provider": "gemini", "model": "gemini-2.5-flash",
+      "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/", "api_key_env": "GEMINI_API_KEY",
+      "input_price_per_mtok": 0.3, "output_price_per_mtok": 2.5 },
+    { "name": "local-llama", "kind": "llm", "provider": "ollama", "model": "llama3.1", "base_url": "http://ollama:11434" },
+    { "name": "whisper", "kind": "stt", "provider": "openai", "model": "whisper-1", "api_key_env": "OPENAI_API_KEY",
+      "price_per_audio_minute": 0.006 },
+    { "name": "groq-whisper", "kind": "stt", "provider": "groq", "model": "whisper-large-v3-turbo",
+      "base_url": "https://api.groq.com/openai/v1", "api_key_env": "GROQ_API_KEY" },
+    { "name": "openai-embed", "kind": "embedding", "provider": "openai", "model": "text-embedding-3-small",
+      "api_key_env": "OPENAI_API_KEY", "dimensions": 1536, "input_price_per_mtok": 0.02 }
+  ],
+  "defaults": {
+    "agent": "openai-mini",
+    "extraction": "gemini-flash",
+    "stt": "whisper",
+    "embedding": "openai-embed"
+  }
+}

@@ -1,0 +1,9 @@
+/bin/
+/dist/
+.env
+providers.json
+*.test
+*.out
+coverage.*
+.DS_Store
+/loadtest/seed/

@@ -1,0 +1,19 @@
+# Overlay for load tests: mounts generated companies and raises limits.
+services:
+  api:
+    volumes:
+      - ./loadtest/seed:/app/loadseed:ro
+    environment:
+      LEDGERBOT_SEED_DIR: /app/loadseed
+      LEDGERBOT_RATE_RPS: "0"
+      LEDGERBOT_TENANT_TTL: 5m
+      LEDGERBOT_FX_SOURCE: static
+      LEDGERBOT_LOG_LEVEL: warn
+  worker:
+    volumes:
+      - ./loadtest/seed:/app/loadseed:ro
+    environment:
+      LEDGERBOT_SEED_DIR: /app/loadseed
+      LEDGERBOT_TENANT_TTL: 5m
+      LEDGERBOT_FX_SOURCE: static
+      LEDGERBOT_LOG_LEVEL: warn

@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ledgerbot/contracts/event.schema.json",
+  "title": "Event envelope",
+  "description": "Shared by inbound host events (POST /v1/events), the simulator, and outbound webhook deliveries. Webhook requests carry X-Ledgerbot-Event, X-Ledgerbot-Delivery and X-Ledgerbot-Signature (t=<unix>,v1=<hex HMAC-SHA256(secret, t + '.' + body)>). Non-2xx responses are retried with backoff (12 attempts); 410 stops delivery.",
+  "type": "object",
+  "required": ["id", "type", "company_id", "occurred_at", "data"],
+  "properties": {
+    "id": { "type": "string" },
+    "type": { "type": "string" },
+    "company_id": { "type": "string" },
+    "source": { "enum": ["host", "simulator", "ledgerbot"] },
+    "occurred_at": { "type": "string", "format": "date-time" },
+    "data": { "type": "object" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "type": { "const": "stock.low" } } },
+      "then": { "properties": { "data": { "type": "object", "required": ["product_id", "name", "stock", "min_stock"], "properties": {
+        "product_id": { "type": "string" }, "name": { "type": "string" }, "unit": { "type": "string" },
+        "stock": { "type": "integer", "description": "thousandths" }, "min_stock": { "type": "integer" } } } } }
+    },
+    {
+      "if": { "properties": { "type": { "const": "invoice.overdue" } } },
+      "then": { "properties": { "data": { "type": "object", "required": ["customer_id", "invoice_no", "amount", "due_date"], "properties": {
+        "customer_id": { "type": "string" }, "customer_name": { "type": "string" }, "invoice_no": { "type": "string" },
+        "amount": { "type": "integer", "description": "kuruş" }, "due_date": { "type": "string" } } } } }
+    },
+    {
+      "if": { "properties": { "type": { "const": "payment.received" } } },
+      "then": { "properties": { "data": { "type": "object", "required": ["customer_id", "amount"], "properties": {
+        "customer_id": { "type": "string" }, "amount": { "type": "integer" }, "reference": { "type": "string" } } } } }
+    }
+  ],
+  "$comment": "Inbound types: stock.low, invoice.overdue, payment.received, order.created, settings.changed. Outbound types: draft.created, draft.committed, draft.rejected, draft.duplicate, message.handled, deletion.completed."
+}

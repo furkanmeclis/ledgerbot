@@ -1,0 +1,76 @@
+# ledgerbot: stateless API replicas + redundant workers on PostgreSQL (pgvector).
+#   docker compose up -d --build
+#   curl localhost:8080/healthz
+# Scale: docker compose up -d --scale api=4 --scale worker=6
+name: ledgerbot
+
+x-app: &app
+  build: .
+  image: ledgerbot:local
+  env_file: .env
+  environment:
+    LEDGERBOT_DATABASE_URL: postgres://ledgerbot:ledgerbot@postgres:5432/ledgerbot?sslmode=disable
+  depends_on:
+    migrate:
+      condition: service_completed_successfully
+  restart: unless-stopped
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_USER: ledgerbot
+      POSTGRES_PASSWORD: ledgerbot
+      POSTGRES_DB: ledgerbot
+    command: ["postgres", "-c", "max_connections=400", "-c", "shared_buffers=512MB", "-c", "synchronous_commit=off"]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ledgerbot -d ledgerbot"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  migrate:
+    build: .
+    image: ledgerbot:local
+    env_file: .env
+    environment:
+      LEDGERBOT_DATABASE_URL: postgres://ledgerbot:ledgerbot@postgres:5432/ledgerbot?sslmode=disable
+    command: ["migrate"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    <<: *app
+    command: ["api"]
+    deploy:
+      replicas: 2
+    healthcheck:
+      test: ["CMD", "/app/ledgerbot", "healthcheck"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  worker:
+    <<: *app
+    command: ["worker"]
+    deploy:
+      replicas: 3
+
+  # Round-robin entry point for the API replicas.
+  gateway:
+    image: caddy:2.10-alpine
+    command: ["caddy", "reverse-proxy", "--from", ":8080", "--to", "api:8080"]
+    ports:
+      - "8080:8080"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  pgdata:

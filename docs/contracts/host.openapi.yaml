@@ -1,0 +1,165 @@
+openapi: 3.1.0
+info:
+  title: ledgerbot host contracts
+  version: 0.1.0
+  description: |
+    Endpoints the **host system** (the accounting application) implements so that
+    ledgerbot can run against real data. ledgerbot calls them with
+    `Authorization: Bearer <LEDGERBOT_HOST_API_TOKEN>`.
+
+    Until the host implements them, ledgerbot runs on seed files
+    (`LEDGERBOT_TENANT_SOURCE=file`) and the fake data driver (`LEDGERBOT_DATA_DRIVER=fake`).
+
+    Money is always an integer in **kuruş** (minor units). Quantities are integers in
+    **thousandths** of a unit (1000 = 1 piece).
+servers:
+  - url: https://host.example/ledgerbot
+security:
+  - token: []
+components:
+  securitySchemes:
+    token: { type: http, scheme: bearer }
+paths:
+  # ---------------------------------------------------------------- tenant contracts
+  /companies/{company}/settings:
+    get:
+      summary: Company settings (save mode, providers, API keys, webhooks, rules, prompts)
+      parameters: [{ name: company, in: path, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: Settings, content: { application/json: { schema: { $ref: 'settings.schema.json' } } } }
+        '404': { description: Unknown company }
+  /companies/{company}/permissions:
+    get:
+      summary: Permission matrix (roles, capabilities, users and their channel addresses)
+      parameters: [{ name: company, in: path, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: Matrix, content: { application/json: { schema: { $ref: 'permissions.schema.json' } } } }
+        '404': { description: Unknown company }
+  /identities:
+    get:
+      summary: Route a channel address to companies (central WhatsApp number / shared bot)
+      parameters:
+        - { name: channel, in: query, required: true, schema: { type: string, enum: [wuzapi, waba, telegram, email] } }
+        - { name: address, in: query, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Companies this address belongs to
+          content: { application/json: { schema: { type: object, properties: { companies: { type: array, items: { type: string } } } } } }
+
+  # ---------------------------------------------------------------- data provider (apidriver)
+  /companies/{company}/customers:
+    get:
+      summary: Search customers (cari)
+      parameters:
+        - { name: company, in: path, required: true, schema: { type: string } }
+        - { name: q, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer } }
+      responses:
+        '200':
+          description: Customers
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { type: object, properties: { id: { type: string }, name: { type: string }, phone: { type: string }, email: { type: string } } }
+  /companies/{company}/customers/{id}/balance:
+    get:
+      summary: Customer balance (positive = customer owes)
+      parameters:
+        - { name: company, in: path, required: true, schema: { type: string } }
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Balance
+          content:
+            application/json:
+              schema: { type: object, properties: { customer_id: { type: string }, balance: { type: integer }, overdue: { type: integer }, as_of: { type: string, format: date-time } } }
+  /companies/{company}/receivables/overdue:
+    get:
+      summary: Overdue invoices
+      parameters:
+        - { name: company, in: path, required: true, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer } }
+      responses:
+        '200':
+          description: Items
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { type: object, properties: { customer_id: { type: string }, customer_name: { type: string }, invoice_no: { type: string }, amount: { type: integer }, due_date: { type: string, format: date } } }
+  /companies/{company}/products:
+    get:
+      summary: Search products with current stock
+      parameters:
+        - { name: company, in: path, required: true, schema: { type: string } }
+        - { name: q, in: query, schema: { type: string } }
+        - { name: low_stock, in: query, schema: { type: boolean } }
+      responses:
+        '200':
+          description: Products
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id: { type: string }
+                    sku: { type: string }
+                    name: { type: string }
+                    unit: { type: string }
+                    price: { type: integer }
+                    vat_rate: { type: integer }
+                    stock: { type: integer }
+                    min_stock: { type: integer }
+  /companies/{company}/summary:
+    get:
+      summary: Daily summary
+      parameters:
+        - { name: company, in: path, required: true, schema: { type: string } }
+        - { name: day, in: query, schema: { type: string, format: date } }
+      responses:
+        '200':
+          description: Summary
+          content:
+            application/json:
+              schema: { type: object, properties: { day: { type: string }, sales: { type: integer }, collections: { type: integer }, payments: { type: integer }, expenses: { type: integer }, orders: { type: integer } } }
+  /companies/{company}/records:
+    post:
+      summary: Commit a record (collection, payment, expense, order)
+      description: Must be idempotent on `draft_id` (also sent as the Idempotency-Key header).
+      parameters: [{ name: company, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind, draft_id, amount, date]
+              properties:
+                kind: { type: string, enum: [collection, payment, expense, order] }
+                draft_id: { type: string }
+                actor_id: { type: string }
+                customer_id: { type: string }
+                vendor: { type: string }
+                vendor_tax_id: { type: string }
+                document_no: { type: string }
+                date: { type: string, format: date-time }
+                method: { type: string }
+                amount: { type: integer }
+                vat: { type: integer }
+                note: { type: string }
+                lines:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      product_id: { type: string }
+                      name: { type: string }
+                      quantity: { type: integer }
+                      unit: { type: string }
+                      unit_price: { type: integer }
+                      vat_rate: { type: integer }
+                      total: { type: integer }
+      responses:
+        '200': { description: Committed, content: { application/json: { schema: { type: object, properties: { external_id: { type: string } } } } } }

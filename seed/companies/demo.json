@@ -1,0 +1,41 @@
+{
+  "settings": {
+    "version": 1,
+    "save_mode": "auto_save",
+    "locale": "tr-TR",
+    "ai_daily_limit": 500,
+    "providers": {},
+    "api_keys": [
+      { "id": "demo-key", "sha256": "59c7b9a3c6f7d1838ff3cb12d947dd5b75a2705ad9374149e2d918bb37eda2ed", "scopes": ["*"] }
+    ],
+    "webhooks": [],
+    "rules": [
+      { "event": "stock.low", "notify_roles": ["owner", "accountant"], "throttle": "6h" },
+      { "event": "invoice.overdue", "notify_roles": ["owner", "accountant"], "throttle": "24h" },
+      { "event": "payment.received", "notify_roles": ["owner"] }
+    ],
+    "prompts": {
+      "system": "Firma bir kırtasiye ve ofis malzemeleri toptancısıdır. Kısa ve resmi cevap ver.",
+      "roles": { "sales": "Kullanıcı satış temsilcisidir, kayıt yetkisi yoktur." }
+    }
+  },
+  "permissions": {
+    "version": 1,
+    "roles": {
+      "owner":      { "capabilities": ["*"] },
+      "accountant": { "capabilities": ["*"], "save_mode": "ask_approval" },
+      "sales":      { "capabilities": ["query_*", "create_order", "send_statement", "help"], "scope": "own" },
+      "viewer":     { "capabilities": ["query_*", "daily_summary", "help"], "save_mode": "reply_only" }
+    },
+    "users": [
+      { "id": "u-owner", "name": "Furkan", "role": "owner",
+        "addresses": { "dev": "owner", "telegram": "100000001", "wuzapi": "+905320000001", "email": "owner@demo.local" } },
+      { "id": "u-acc", "name": "Ayşe Muhasebe", "role": "accountant",
+        "addresses": { "dev": "accountant", "telegram": "100000002", "wuzapi": "+905320000002", "email": "muhasebe@demo.local" } },
+      { "id": "u-sales", "name": "Emre Satış", "role": "sales",
+        "addresses": { "dev": "sales", "telegram": "100000003", "wuzapi": "+905320000003" } },
+      { "id": "u-view", "name": "Selin İzleyici", "role": "viewer",
+        "addresses": { "dev": "viewer" } }
+    ]
+  }
+}

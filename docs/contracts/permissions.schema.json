@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ledgerbot/contracts/permissions.schema.json",
+  "title": "Permission matrix",
+  "description": "Roles, what each role may do through ledgerbot, and the users mapped to roles with their channel addresses. Host roles are mapped onto this matrix by the host; ledgerbot enforces it on every message and API call.",
+  "type": "object",
+  "required": ["roles", "users"],
+  "properties": {
+    "company_id": { "type": "string" },
+    "version": { "type": "integer" },
+    "roles": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["capabilities"],
+        "properties": {
+          "capabilities": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Capability names or globs: \"*\", \"query_*\", \"record_collection\". See GET /v1/capabilities."
+          },
+          "channels": {
+            "type": "array",
+            "items": { "enum": ["dev", "telegram", "wuzapi", "waba", "email"] },
+            "description": "Channels this role may use; empty = all. API calls are not restricted by channel."
+          },
+          "save_mode": { "enum": ["reply_only", "ask_approval", "auto_save"], "description": "Can only tighten the company save mode." },
+          "scope": { "enum": ["all", "own"], "description": "own: the role can only approve/see its own drafts." }
+        }
+      }
+    },
+    "users": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "role", "addresses"],
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "role": { "type": "string" },
+          "addresses": {
+            "type": "object",
+            "description": "Channel address per channel kind. WhatsApp addresses (wuzapi/waba) are E.164 phone numbers and shared between both kinds.",
+            "properties": {
+              "dev": { "type": "string" },
+              "telegram": { "type": "string", "description": "Telegram chat id" },
+              "wuzapi": { "type": "string", "pattern": "^\\+[1-9][0-9]{6,14}$" },
+              "waba": { "type": "string", "pattern": "^\\+[1-9][0-9]{6,14}$" },
+              "email": { "type": "string", "format": "email" }
+            },
+            "additionalProperties": false
+          }
+        }
+      }
+    }
+  }
+}

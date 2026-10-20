@@ -1,0 +1,120 @@
+package assistant
+
+import "fmt"
+
+// Reply templates. Tool output is sent verbatim; the LLM never writes numbers.
+// Languages: tr (default), en, ar.
+var messages = map[string]map[string]string{
+	"tr": {
+		"unknown_sender":     "Bu adres herhangi bir kullanıcıya bağlı değil. Lütfen yöneticinizle iletişime geçin.",
+		"unknown_intent":     "Ne yapmak istediğinizi anlayamadım. \"yardım\" yazarak yapabileceklerimi görebilirsiniz.",
+		"denied":             "Bu işlem için yetkiniz yok (%s).",
+		"customer_not_found": "\"%s\" adında bir cari bulamadım.",
+		"customer_ambiguous": "Birden fazla cari buldum, hangisi?\n%s",
+		"product_not_found":  "\"%s\" adında bir ürün bulamadım.",
+		"bad_amount":         "Tutarı anlayamadım: \"%s\".",
+		"fx_failed":          "%s için güncel kur alınamadı, lütfen TL olarak yazın.",
+		"fx_note":            " (%s %s × %s = %s)",
+		"preview":            "Kaydedilecek: %s\nBu firmada otomatik kayıt kapalı, kayıt yapılmadı.",
+		"ask":                "%s\nOnaylıyor musunuz? (evet / hayır)",
+		"committed":          "Kaydedildi: %s",
+		"rejected":           "İptal edildi: %s",
+		"commit_failed":      "Kayıt sırasında hata oluştu, taslak saklandı: %s",
+		"nothing_pending":    "Onay bekleyen bir işlem yok.",
+		"duplicate":          "Bu belge daha önce gönderilmiş görünüyor, tekrar kaydetmedim.",
+		"quota":              "Bugünkü yapay zeka kullanım limitiniz doldu. Yazılı komutlar çalışmaya devam ediyor.",
+		"unreadable":         "Belgeyi okuyamadım, daha net bir fotoğraf gönderebilir misiniz?",
+		"low_confidence":     "Belgeden emin olamadığım alanlar var, lütfen kontrol edin:\n%s",
+		"unsupported_media":  "Bu dosya türünü henüz işleyemiyorum.",
+		"empty_audio":        "Sesli mesajı anlayamadım.",
+		"heard":              "🎙️ \"%s\"",
+		"degraded":           "Ayarlara şu an ulaşılamıyor, sadece sorgu yapabilirim.",
+		"error":              "Bir hata oluştu, lütfen tekrar deneyin.",
+		"collection":         "Tahsilat: %s, %s (%s)",
+		"payment":            "Ödeme: %s, %s (%s)",
+		"expense":            "%s gideri: %d kalem, KDV %s, toplam %s",
+		"einvoice":           "e-Fatura %s, %s: %d kalem, KDV %s, toplam %s",
+		"order":              "%s için sipariş: %s × %s = %s",
+		"balance":            "%s bakiyesi: %s (vadesi geçen %s)",
+		"stock":              "%s stok: %s %s (kritik seviye %s)",
+		"stock_none":         "Stok bilgisi bulunamadı.",
+		"low_stock_list":     "Kritik stoktaki ürünler:\n%s",
+		"low_stock_none":     "Kritik seviyede ürün yok.",
+		"overdue_list":       "Vadesi geçen alacaklar (toplam %s):\n%s",
+		"overdue_none":       "Vadesi geçen alacak yok.",
+		"summary":            "%s özeti\nSatış: %s (%d sipariş)\nTahsilat: %s\nÖdeme: %s\nGider: %s",
+		"statement":          "%s ekstresi\nBakiye: %s\nVadesi geçen: %s\n%s",
+		"alert_stock":        "⚠️ Kritik stok: %s, kalan %s %s (en az %s).",
+		"alert_overdue":      "⏰ Vadesi geçti: %s, %s fatura %s, %s tarihinde.",
+		"help":               "Yapabileceklerim:\n• \"Ahmet'ten 5.000 TL tahsilat\"\n• \"Mehmet'e 2.000 TL ödeme yaptım\"\n• \"Ahmet Yılmaz'ın bakiyesi\"\n• \"stok toner\" / \"kritik stok\"\n• \"vadesi geçenler\" / \"gün sonu özeti\"\n• \"Ahmet için 10 paket A4 kağıdı sipariş oluştur\"\n• Fiş/fatura fotoğrafı, PDF veya e-Fatura XML\n• Sesli mesaj",
+	},
+	"en": {
+		"unknown_sender":     "This address is not linked to any user. Please contact your administrator.",
+		"unknown_intent":     "I did not understand. Type \"help\" to see what I can do.",
+		"denied":             "You are not allowed to do this (%s).",
+		"customer_not_found": "No account named \"%s\".",
+		"customer_ambiguous": "Several accounts match, which one?\n%s",
+		"product_not_found":  "No product named \"%s\".",
+		"bad_amount":         "I could not read the amount: \"%s\".",
+		"fx_failed":          "Could not get today's rate for %s, please write the amount in TRY.",
+		"fx_note":            " (%s %s × %s = %s)",
+		"preview":            "Would record: %s\nAuto-save is off for this company, nothing was saved.",
+		"ask":                "%s\nConfirm? (yes / no)",
+		"committed":          "Saved: %s",
+		"rejected":           "Cancelled: %s",
+		"commit_failed":      "Saving failed, the draft was kept: %s",
+		"nothing_pending":    "Nothing is waiting for approval.",
+		"duplicate":          "This document was already sent, I did not record it again.",
+		"quota":              "Today's AI quota is used up. Text commands still work.",
+		"unreadable":         "I could not read the document, could you send a clearer photo?",
+		"low_confidence":     "Some fields are uncertain, please check:\n%s",
+		"unsupported_media":  "I cannot process this file type yet.",
+		"empty_audio":        "I could not understand the voice message.",
+		"heard":              "🎙️ \"%s\"",
+		"degraded":           "Settings are unreachable right now, I can only answer queries.",
+		"error":              "Something went wrong, please try again.",
+		"collection":         "%[2]s received from %[1]s (%[3]s)",
+		"payment":            "%[2]s paid to %[1]s (%[3]s)",
+		"expense":            "%s expense: %d lines, VAT %s, total %s",
+		"einvoice":           "e-Invoice %s, %s: %d lines, VAT %s, total %s",
+		"order":              "Order for %s: %s × %s = %s",
+		"balance":            "%s balance: %s (overdue %s)",
+		"stock":              "%s stock: %s %s (minimum %s)",
+		"stock_none":         "No stock information found.",
+		"low_stock_list":     "Products below minimum:\n%s",
+		"low_stock_none":     "No product is below minimum.",
+		"overdue_list":       "Overdue receivables (total %s):\n%s",
+		"overdue_none":       "No overdue receivables.",
+		"summary":            "Summary for %s\nSales: %s (%d orders)\nCollections: %s\nPayments: %s\nExpenses: %s",
+		"statement":          "Statement for %s\nBalance: %s\nOverdue: %s\n%s",
+		"alert_stock":        "⚠️ Low stock: %s, %s %s left (minimum %s).",
+		"alert_overdue":      "⏰ Overdue: %s, %s invoice %s, due %s.",
+		"help":               "I can:\n• \"received 500 usd from Ahmet\"\n• \"paid 300 eur to Mehmet\"\n• \"balance of Ahmet\"\n• \"stock toner\"\n• \"overdue\" / \"daily summary\"\n• Read receipt photos, PDFs and e-invoice XML\n• Understand voice notes",
+	},
+	"ar": {
+		"unknown_sender":  "هذا العنوان غير مرتبط بأي مستخدم.",
+		"unknown_intent":  "لم أفهم طلبك. اكتب \"help\" لمعرفة ما يمكنني فعله.",
+		"denied":          "ليس لديك صلاحية لهذا الإجراء (%s).",
+		"preview":         "سيتم تسجيل: %s\nالحفظ التلقائي معطل، لم يتم الحفظ.",
+		"ask":             "%s\nهل تؤكد؟ (نعم / لا)",
+		"committed":       "تم الحفظ: %s",
+		"rejected":        "تم الإلغاء: %s",
+		"nothing_pending": "لا توجد عملية بانتظار الموافقة.",
+		"duplicate":       "تم إرسال هذا المستند من قبل، لم أسجله مرة أخرى.",
+		"quota":           "تم استنفاد حصة الذكاء الاصطناعي لهذا اليوم.",
+		"error":           "حدث خطأ، يرجى المحاولة مرة أخرى.",
+		"balance":         "رصيد %s: %s (المتأخر %s)",
+	},
+}
+
+// T formats a message, falling back to Turkish for missing translations.
+func T(lang, key string, args ...any) string {
+	f, ok := messages[lang][key]
+	if !ok {
+		f = messages["tr"][key]
+	}
+	if len(args) == 0 {
+		return f
+	}
+	return fmt.Sprintf(f, args...)
+}

@@ -1,0 +1,360 @@
+openapi: 3.1.0
+info:
+  title: ledgerbot API
+  version: 0.1.0
+  description: |
+    REST API of the ledgerbot assistant layer. Every response uses the envelope
+    `{"data": ...}` or `{"error": {"code", "message"}}`.
+
+    **Authentication**: `Authorization: Bearer lb_<company>_<secret>`. ledgerbot stores
+    only the SHA-256 hex digest of each key, delivered through the company settings
+    contract (`settings.api_keys`). Keys carry scopes: `messages`, `drafts`, `channels`,
+    `events`, `usage`, `audit`, `deletion`, `dev`, or `*`.
+
+    **Request signing (optional)**: when `settings.signing_secret` is set, requests must
+    carry `X-Ledgerbot-Signature: t=<unix>,v1=<hex HMAC-SHA256(secret, t + "." + body)>`,
+    within ±5 minutes. Outbound webhooks are signed the same way.
+
+    **Idempotency**: POST requests accept `Idempotency-Key`. A repeated key replays the
+    stored response (header `Idempotent-Replayed: true`) for 24h; reusing a key with a
+    different body returns 422.
+
+    **Rate limits**: per company token bucket (default 20 rps, burst 40, per replica).
+servers:
+  - url: http://localhost:8080
+security:
+  - apiKey: []
+components:
+  securitySchemes:
+    apiKey:
+      type: http
+      scheme: bearer
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      schema: { type: string, maxLength: 200 }
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code: { type: string }
+            message: { type: string }
+    Media:
+      type: object
+      required: [mime, data]
+      properties:
+        mime: { type: string, example: image/jpeg }
+        filename: { type: string }
+        data: { type: string, format: byte, description: base64 }
+    Intent:
+      type: object
+      properties:
+        capability: { type: string, example: record_collection }
+        args: { type: object, additionalProperties: { type: string } }
+        source: { type: string, enum: [rules, llm] }
+    Draft:
+      type: object
+      properties:
+        id: { type: string }
+        company_id: { type: string }
+        actor_id: { type: string }
+        capability: { type: string }
+        status: { type: string, enum: [preview, pending, committed, rejected, failed] }
+        payload: { type: object, description: dataprovider.Record (amounts in kuruş) }
+        summary: { type: string }
+        external_id: { type: string }
+        channel: { type: string }
+        sender: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    Reply:
+      type: object
+      properties:
+        texts: { type: array, items: { type: string }, description: Sent to the user verbatim }
+        language: { type: string, enum: [tr, en, ar] }
+        drafts: { type: array, items: { $ref: '#/components/schemas/Draft' } }
+        intents: { type: array, items: { $ref: '#/components/schemas/Intent' } }
+    Channel:
+      type: object
+      properties:
+        id: { type: string }
+        company_id: { type: string }
+        kind: { type: string, enum: [telegram, wuzapi, waba, email] }
+        mode: { type: string, description: 'wuzapi: per_company | central' }
+        name: { type: string }
+        enabled: { type: boolean }
+        status: { type: string }
+        updated_at: { type: string, format: date-time }
+    Queued:
+      type: object
+      properties:
+        message_id: { type: string }
+        job_id: { type: integer }
+        status: { type: string, example: queued }
+paths:
+  /healthz:
+    get: { security: [], summary: Liveness, responses: { '200': { description: alive } } }
+  /readyz:
+    get: { security: [], summary: Readiness (database reachable), responses: { '200': { description: ready }, '503': { description: not ready } } }
+  /metrics:
+    get: { security: [], summary: Prometheus metrics, responses: { '200': { description: text exposition } } }
+
+  /v1/capabilities:
+    get:
+      summary: List capabilities and which roles may use them
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      capabilities:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            name: { type: string }
+                            description: { type: string }
+                            args: { type: array, items: { type: string } }
+                            write: { type: boolean }
+                            roles: { type: array, items: { type: string } }
+                      save_mode: { type: string }
+                      degraded: { type: boolean }
+
+  /v1/messages:
+    post:
+      summary: Analyze a message on behalf of a user
+      description: |
+        Runs the assistant as `actor_id` (a user in the permission matrix). Text, image,
+        PDF, UBL-TR XML or audio. Synchronous by default; with `async: true` the result is
+        processed by workers and delivered through webhooks (`draft.*`, `message.handled`).
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [actor_id]
+              properties:
+                actor_id: { type: string }
+                text: { type: string }
+                media: { $ref: '#/components/schemas/Media' }
+                async: { type: boolean }
+      responses:
+        '200': { description: Reply, content: { application/json: { schema: { properties: { data: { $ref: '#/components/schemas/Reply' } } } } } }
+        '202': { description: Queued, content: { application/json: { schema: { properties: { data: { $ref: '#/components/schemas/Queued' } } } } } }
+        '422': { description: Unknown actor, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /v1/messages/send:
+    post:
+      summary: Send a message over a connected channel
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [channel, to, text]
+              properties:
+                channel: { type: string, enum: [telegram, wuzapi, waba, email, dev] }
+                channel_id: { type: string, description: Optional connection id; default is the company's first enabled connection of that kind }
+                to: { type: string, description: 'E.164 phone, Telegram chat id or e-mail' }
+                text: { type: string }
+      responses:
+        '202': { description: Queued, content: { application/json: { schema: { properties: { data: { $ref: '#/components/schemas/Queued' } } } } } }
+
+  /v1/drafts:
+    get:
+      summary: List drafts (keyset pagination)
+      parameters:
+        - { name: status, in: query, schema: { type: string } }
+        - { name: actor_id, in: query, schema: { type: string } }
+        - { name: before, in: query, schema: { type: string, format: date-time }, description: '`next_before` from the previous page' }
+        - { name: limit, in: query, schema: { type: integer, maximum: 200 } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                properties:
+                  data:
+                    properties:
+                      drafts: { type: array, items: { $ref: '#/components/schemas/Draft' } }
+                      next_before: { type: string }
+  /v1/drafts/{id}:
+    get:
+      summary: Get a draft
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses: { '200': { description: OK }, '404': { description: Not found } }
+  /v1/drafts/{id}/approve:
+    post:
+      summary: Approve a pending draft (commits it to the data provider)
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }, { $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        content: { application/json: { schema: { type: object, required: [actor_id], properties: { actor_id: { type: string }, lang: { type: string } } } } }
+      responses: { '200': { description: Committed }, '409': { description: Not pending, not permitted, or settings degraded } }
+  /v1/drafts/{id}/reject:
+    post:
+      summary: Reject a pending draft
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        content: { application/json: { schema: { type: object, required: [actor_id], properties: { actor_id: { type: string } } } } }
+      responses: { '200': { description: Rejected }, '409': { description: Not pending } }
+
+  /v1/channels:
+    get:
+      summary: List channel connections (credentials are never returned)
+      responses: { '200': { description: OK } }
+    post:
+      summary: Create or update a channel connection
+      description: |
+        `config` is stored encrypted (AES-256-GCM). Shapes per kind:
+        - telegram: `{bot_token, mode: webhook|poll, secret_token}`
+        - wuzapi: `{base_url, token, hmac_key}` (mode `per_company` or `central`)
+        - waba: `{phone_number_id, access_token, app_secret, verify_token, api_version}`
+        - email: `{address, webhook_secret, smtp_host, smtp_port, smtp_user, smtp_pass}`
+        The response contains the `webhook_url` to configure at the provider.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind, config]
+              properties:
+                id: { type: string }
+                kind: { type: string, enum: [telegram, wuzapi, waba, email] }
+                mode: { type: string }
+                name: { type: string }
+                enabled: { type: boolean }
+                config: { type: object }
+      responses: { '200': { description: Saved } }
+  /v1/channels/{id}:
+    delete:
+      summary: Delete a connection
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses: { '200': { description: Deleted } }
+  /v1/channels/{id}/status:
+    get:
+      summary: Live connection status (connected, waiting_qr, disconnected, error)
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses: { '200': { description: OK } }
+  /v1/channels/{id}/connect:
+    post: { summary: Start a WuzAPI session (QR becomes available), parameters: [{ name: id, in: path, required: true, schema: { type: string } }], responses: { '200': { description: OK } } }
+  /v1/channels/{id}/qr:
+    get: { summary: WuzAPI pairing QR as a data URL, parameters: [{ name: id, in: path, required: true, schema: { type: string } }], responses: { '200': { description: OK } } }
+  /v1/channels/{id}/logout:
+    post: { summary: Log out a WuzAPI session, parameters: [{ name: id, in: path, required: true, schema: { type: string } }], responses: { '200': { description: OK } } }
+
+  /v1/events:
+    post:
+      summary: Push a host event (stock.low, invoice.overdue, payment.received, settings.changed ...)
+      description: See event.schema.json. Events trigger rules (alerts) and webhook fan-out.
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [type]
+              properties:
+                id: { type: string }
+                type: { type: string }
+                occurred_at: { type: string, format: date-time }
+                data: { type: object }
+      responses: { '202': { description: Queued } }
+
+  /v1/usage:
+    get:
+      summary: AI usage and cost per purpose/provider/model, plus today's quota
+      parameters:
+        - { name: from, in: query, schema: { type: string, format: date } }
+        - { name: to, in: query, schema: { type: string, format: date } }
+      responses: { '200': { description: OK } }
+  /v1/audit:
+    get:
+      summary: Audit log (newest first)
+      parameters:
+        - { name: before_id, in: query, schema: { type: integer } }
+        - { name: limit, in: query, schema: { type: integer, maximum: 500 } }
+      responses: { '200': { description: OK } }
+
+  /v1/deletion-requests:
+    post:
+      summary: Request deletion of a data subject (KVKK / GDPR)
+      requestBody:
+        content: { application/json: { schema: { type: object, required: [subject], properties: { channel: { type: string }, subject: { type: string, description: 'phone, chat id or e-mail' } } } } }
+      responses: { '202': { description: Accepted } }
+  /v1/deletion-requests/{id}:
+    get:
+      summary: Deletion request status
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses: { '200': { description: OK } }
+
+  /v1/dev/messages:
+    post:
+      summary: '[dev] Send a message as a dev-channel user (LEDGERBOT_DEV=true)'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sender]
+              properties:
+                sender: { type: string, description: 'dev address from the permission matrix, e.g. "accountant"' }
+                text: { type: string }
+                media: { $ref: '#/components/schemas/Media' }
+                async: { type: boolean }
+      responses: { '200': { description: Reply }, '202': { description: Queued } }
+  /v1/dev/outbox:
+    get:
+      summary: '[dev] Replies sent to a dev user'
+      parameters: [{ name: to, in: query, required: true, schema: { type: string } }]
+      responses: { '200': { description: OK } }
+  /v1/simulator/run:
+    post: { summary: '[dev] Run one simulator round (fake sales, stock and overdue events)', responses: { '200': { description: OK } } }
+
+  /webhooks/{kind}/{connID}:
+    post:
+      security: []
+      summary: Inbound channel webhook (Telegram, WuzAPI, Meta WABA, e-mail inbound JSON)
+      parameters:
+        - { name: kind, in: path, required: true, schema: { type: string } }
+        - { name: connID, in: path, required: true, schema: { type: string } }
+      responses: { '200': { description: Queued }, '401': { description: Signature check failed } }
+    get:
+      security: []
+      summary: Meta webhook verification (hub.challenge)
+      parameters:
+        - { name: kind, in: path, required: true, schema: { type: string } }
+        - { name: connID, in: path, required: true, schema: { type: string } }
+      responses: { '200': { description: Challenge echoed } }
+  /webhooks/meta/data-deletion:
+    post:
+      security: []
+      summary: Meta Data Deletion Request Callback (signed_request)
+      requestBody:
+        content: { application/x-www-form-urlencoded: { schema: { type: object, properties: { signed_request: { type: string } } } } }
+      responses:
+        '200':
+          description: Meta-compatible response
+          content: { application/json: { schema: { type: object, properties: { url: { type: string }, confirmation_code: { type: string } } } } }
+
+  /admin/jobs:
+    get:
+      summary: Jobs by state (default discarded = dead letters). Admin token.
+      parameters:
+        - { name: state, in: query, schema: { type: string, enum: [available, running, retryable, discarded, cancelled, completed] } }
+        - { name: limit, in: query, schema: { type: integer } }
+      responses: { '200': { description: OK } }
