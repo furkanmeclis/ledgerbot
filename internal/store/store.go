@@ -108,6 +108,8 @@ type Store interface {
 	// TransitionDraft moves a draft from one status to another atomically.
 	TransitionDraft(ctx context.Context, c domain.CompanyID, id string, from, to domain.DraftStatus, externalID string) (domain.Draft, error)
 	ListDrafts(ctx context.Context, c domain.CompanyID, f DraftFilter) ([]domain.Draft, error)
+	// LastCommitted returns the actor's most recent committed draft of the given capabilities (memory).
+	LastCommitted(ctx context.Context, c domain.CompanyID, actor domain.UserID, capabilities []string) (domain.Draft, error)
 	// LatestPending returns the newest pending draft for a sender (approval flow).
 	LatestPending(ctx context.Context, c domain.CompanyID, ch domain.ChannelKind, sender string, maxAge time.Duration) (domain.Draft, error)
 

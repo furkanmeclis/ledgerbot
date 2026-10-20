@@ -214,6 +214,11 @@ type rule struct {
 }
 
 var rules = []rule{
+	// memory and knowledge first: a note may itself contain "tahsilat" etc.
+	{"repeat_last", regexp.MustCompile(`(?i)^(?:her\s+zamanki\s+gibi|geçen\s+seferki\s+gibi|aynısından|aynısı)(?:[,\s]+` + amountRe + `\s*` + currencyRe + `)?\s*(?:kaydet|gir|yap)?$`), []string{"amount", "currency"}},
+	{"add_note", regexp.MustCompile(`(?i)^(?:not\s+al|not\s+et|hatırla|unutma|note)\s*[:,-]?\s+(.+)$`), []string{"text"}},
+	{"search_knowledge", regexp.MustCompile(`(?i)^(?:notlarda|notlarımda|hafızada|kayıtlarda)\s+(.+?)(?:\s+(?:ara|bul|ne\s+yazıyor|var\s+m[ıi]))?\??$`), []string{"query"}},
+	{"search_knowledge", regexp.MustCompile(`(?i)^(.+?)\s+hakkında\s+(?:ne\s+biliyorsun|not\s+var\s+m[ıi]|bilgi)\??$`), []string{"query"}},
 	// "Ahmet'ten 5.000 TL tahsilat", "Ahmet Yılmaz'dan 500 dolar nakit aldım"
 	{"record_collection", regexp.MustCompile(`(?i)^(.+?)` + suffixRe + `\s+` + amountRe + `\s*` + currencyRe + `\s*` + methodRe + `\s*(?:tahsilat(?:\s+(?:yaptım|aldım|yap|al|gir|kaydet))?|tahsil\s+ettim|aldım|alındı)\b`), []string{"customer", "amount", "currency", "method"}},
 	// "5.000 TL tahsilat Ahmet'ten"

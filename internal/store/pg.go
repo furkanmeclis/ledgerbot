@@ -95,6 +95,13 @@ func (p *PG) ListDrafts(ctx context.Context, c domain.CompanyID, f DraftFilter) 
 	return out, rows.Err()
 }
 
+func (p *PG) LastCommitted(ctx context.Context, c domain.CompanyID, actor domain.UserID, caps []string) (domain.Draft, error) {
+	return scanDraft(p.DB.QueryRow(ctx, `
+		SELECT `+draftCols+` FROM drafts
+		WHERE company_id = $1 AND actor_id = $2 AND status = 'committed' AND capability = ANY($3)
+		ORDER BY created_at DESC LIMIT 1`, string(c), string(actor), caps))
+}
+
 func (p *PG) LatestPending(ctx context.Context, c domain.CompanyID, ch domain.ChannelKind, sender string, maxAge time.Duration) (domain.Draft, error) {
 	return scanDraft(p.DB.QueryRow(ctx, `
 		SELECT `+draftCols+` FROM drafts

@@ -94,6 +94,19 @@ func (SimulateArgs) InsertOpts() river.InsertOpts {
 	return river.InsertOpts{Queue: QueueMaint, MaxAttempts: 1}
 }
 
+// RAGIndexArgs embeds and stores text in the company knowledge index.
+type RAGIndexArgs struct {
+	CompanyID domain.CompanyID `json:"company_id"`
+	Source    string           `json:"source"`
+	Ref       string           `json:"ref"`
+	Text      string           `json:"text"`
+}
+
+func (RAGIndexArgs) Kind() string { return "rag_index" }
+func (RAGIndexArgs) InsertOpts() river.InsertOpts {
+	return river.InsertOpts{Queue: QueueEvents, MaxAttempts: 6}
+}
+
 // CleanupArgs removes expired rows.
 type CleanupArgs struct{}
 

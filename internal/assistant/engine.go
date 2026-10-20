@@ -41,8 +41,10 @@ type Engine struct {
 	Events  events.Publisher
 	FX      *fx.Converter
 	Caps    *Registry
-	Log     *slog.Logger
-	Now     func() time.Time
+	// Knowledge enables memory and RAG capabilities (optional).
+	Knowledge *Knowledge
+	Log       *slog.Logger
+	Now       func() time.Time
 	// ApprovalTTL bounds how long a pending draft can be approved by "evet".
 	ApprovalTTL time.Duration
 }
@@ -211,6 +213,9 @@ func (e *Engine) runCapability(ctx context.Context, call *Call, name string, rep
 
 // saveDraft applies duplicate detection and the save mode.
 func (e *Engine) saveDraft(ctx context.Context, call *Call, capability string, out Outcome) (domain.Draft, string, error) {
+	if out.Capability != "" {
+		capability = out.Capability
+	}
 	id := events.NewID("drf")
 	if out.Fingerprint != "" {
 		prev, dup, err := e.Store.ClaimFingerprint(ctx, call.Actor.CompanyID, out.Fingerprint, id)
@@ -312,6 +317,7 @@ func (e *Engine) commit(ctx context.Context, d domain.Draft, lang string) (domai
 	}
 	e.audit(ctx, store.AuditEntry{CompanyID: d.CompanyID, ActorID: d.ActorID, Channel: d.Channel, Action: "draft.committed", DraftID: d.ID, Detail: mustJSON(map[string]string{"external_id": ext})})
 	_ = e.publish(ctx, d.CompanyID, events.DraftCommitted, cd)
+	e.rememberRecord(ctx, cd)
 	return cd, T(lang, "committed", d.Summary), nil
 }
 

@@ -4,41 +4,18 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"os"
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/jackc/pgx/v5/stdlib"
-	"github.com/pressly/goose/v3"
-
 	"github.com/furkanmeclis/ledgerbot/internal/domain"
-	"github.com/furkanmeclis/ledgerbot/migrations"
+	"github.com/furkanmeclis/ledgerbot/internal/testdb"
 )
 
-// Integration test: set LEDGERBOT_TEST_DATABASE_URL to an empty database
-// (CI uses a pgvector service container).
+// Integration test: set LEDGERBOT_TEST_DATABASE_URL to a PostgreSQL database
+// with pgvector (CI starts one).
 func testPG(t *testing.T) *PG {
 	t.Helper()
-	url := os.Getenv("LEDGERBOT_TEST_DATABASE_URL")
-	if url == "" {
-		t.Skip("LEDGERBOT_TEST_DATABASE_URL not set")
-	}
-	ctx := context.Background()
-	db, err := pgxpool.New(ctx, url)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(db.Close)
-	sqlDB := stdlib.OpenDBFromPool(db)
-	defer sqlDB.Close()
-	goose.SetBaseFS(migrations.FS)
-	goose.SetLogger(goose.NopLogger())
-	_ = goose.SetDialect("postgres")
-	if err := goose.UpContext(ctx, sqlDB, "."); err != nil {
-		t.Fatal(err)
-	}
-	return &PG{DB: db}
+	return &PG{DB: testdb.Open(t)}
 }
 
 func TestPGDraftLifecycle(t *testing.T) {

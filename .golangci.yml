@@ -9,7 +9,7 @@ linters:
     - unconvert
   settings:
     misspell:
-      ignore-rules: [adres]
+      ignore-rules: [adres, personel]
     gosec:
       excludes:
         - G104 # unhandled errors on best-effort writes are deliberate (`_ =`)

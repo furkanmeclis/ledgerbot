@@ -36,6 +36,9 @@ type Outcome struct {
 	Record      *dataprovider.Record
 	Summary     string
 	Fingerprint string // duplicate detection key (documents)
+	// Capability overrides the draft's capability (e.g. repeat_last stores the
+	// repeated record's capability so permissions and memory stay accurate).
+	Capability string
 }
 
 // Capability is one thing the assistant can do. Built-ins are registered by
@@ -59,7 +62,7 @@ type Registry struct {
 // NewRegistry returns a registry with all built-in capabilities.
 func NewRegistry() *Registry {
 	r := &Registry{caps: map[string]Capability{}}
-	for _, c := range builtins() {
+	for _, c := range append(builtins(), memoryCapabilities()...) {
 		r.Register(c)
 	}
 	return r

@@ -40,6 +40,7 @@ import (
 	"github.com/furkanmeclis/ledgerbot/internal/events"
 	"github.com/furkanmeclis/ledgerbot/internal/fx"
 	"github.com/furkanmeclis/ledgerbot/internal/queue"
+	"github.com/furkanmeclis/ledgerbot/internal/rag"
 	"github.com/furkanmeclis/ledgerbot/internal/secretbox"
 	"github.com/furkanmeclis/ledgerbot/internal/store"
 	"github.com/furkanmeclis/ledgerbot/internal/tenant"
@@ -80,6 +81,21 @@ func run(mode string) error {
 		return err
 	}
 	defer db.Close()
+
+	// The database may still be starting (compose, k8s): wait up to 60s.
+	for i := 0; ; i++ {
+		pctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		err := db.Ping(pctx)
+		cancel()
+		if err == nil {
+			break
+		}
+		if i == 30 || ctx.Err() != nil {
+			return fmt.Errorf("database unreachable: %w", err)
+		}
+		log.Info("waiting for database", "err", err)
+		time.Sleep(2 * time.Second)
+	}
 
 	switch mode {
 	case "migrate":
@@ -210,13 +226,28 @@ func build(cfg config.Config, db *pgxpool.Pool, log *slog.Logger, withWorkers bo
 
 	dev := channels.NewDev(50, pg)
 	chans := channels.NewRegistry(dev, channels.Telegram{}, channels.Wuzapi{}, channels.WABA{}, channels.Email{})
+	var index rag.Index
+	if emb, err := reg.Embedder(""); err == nil {
+		index = &rag.PG{DB: db, Embedder: emb}
+	} else {
+		log.Warn("RAG disabled: no embedding provider", "err", err)
+	}
 	engine := &assistant.Engine{
 		Tenants: tenants, Data: data, AI: reg, Store: st, Events: queue.Publisher{Q: q},
 		FX: fx.NewConverter(fxSrc), Caps: assistant.NewRegistry(), Log: log,
 	}
+	if index != nil {
+		engine.Knowledge = &assistant.Knowledge{
+			Index: index, MinScore: 0.25,
+			Remember: func(ctx context.Context, c domain.CompanyID, source, ref, text string) error {
+				_, err := q.Enqueue(ctx, queue.RAGIndexArgs{CompanyID: c, Source: source, Ref: ref, Text: text})
+				return err
+			},
+		}
+	}
 	deps := &worker.Deps{
 		Engine: engine, Channels: chans, Dev: dev, Store: st, Box: box, Tenants: tenants, Directory: dir,
-		Queue: q, Data: data, Log: log, PerCompanyInflight: cfg.PerCompanyInflight, SimCompanies: simCompanies,
+		Queue: q, Data: data, Log: log, PerCompanyInflight: cfg.PerCompanyInflight, SimCompanies: simCompanies, Knowledge: index,
 	}
 	// Workers must be registered even in api mode so inserts validate job kinds.
 	worker.Register(workers, deps)
