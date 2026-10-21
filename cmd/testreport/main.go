@@ -13,6 +13,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"time"
@@ -82,7 +83,8 @@ func main() {
 	page := renderHTML(r)
 	must(os.WriteFile(filepath.Join(*out, "index.html"), []byte(page), 0o600))
 	sum := summarize(r)
-	j, _ := json.MarshalIndent(sum, "", "  ")
+	j, err := json.MarshalIndent(jsonSafe(sum), "", "  ")
+	must(err)
 	must(os.WriteFile(filepath.Join(*out, "summary.json"), j, 0o600))
 	must(os.WriteFile(filepath.Join(*out, "summary.md"), []byte(markdown(r, sum)), 0o600))
 	fmt.Printf("report: %s (tests %d passed, %d failed, %d skipped; %d perf profiles)\n",
@@ -716,4 +718,67 @@ func markdown(r *report, s summary) string {
 		}
 	}
 	return b.String()
+}
+
+// jsonSafe converts v into plain maps and slices, honouring json tags and
+// turning NaN/Inf (unknown measurements) into null, which encoding/json rejects.
+func jsonSafe(v any) any { return scrub(reflect.ValueOf(v)) }
+
+func scrub(v reflect.Value) any {
+	switch v.Kind() {
+	case reflect.Invalid:
+		return nil
+	case reflect.Pointer, reflect.Interface:
+		if v.IsNil() {
+			return nil
+		}
+		return scrub(v.Elem())
+	case reflect.Float32, reflect.Float64:
+		f := v.Float()
+		if math.IsNaN(f) || math.IsInf(f, 0) {
+			return nil
+		}
+		return f
+	case reflect.Slice, reflect.Array:
+		if v.Kind() == reflect.Slice && v.IsNil() {
+			return []any{}
+		}
+		out := make([]any, v.Len())
+		for i := range out {
+			out[i] = scrub(v.Index(i))
+		}
+		return out
+	case reflect.Map:
+		out := map[string]any{}
+		for _, k := range v.MapKeys() {
+			out[fmt.Sprint(k.Interface())] = scrub(v.MapIndex(k))
+		}
+		return out
+	case reflect.Struct:
+		if t, ok := v.Interface().(time.Time); ok {
+			return t
+		}
+		out := map[string]any{}
+		for i := 0; i < v.NumField(); i++ {
+			f := v.Type().Field(i)
+			if !f.IsExported() {
+				continue
+			}
+			name, opts, _ := strings.Cut(f.Tag.Get("json"), ",")
+			if name == "-" {
+				continue
+			}
+			if name == "" {
+				name = f.Name
+			}
+			fv := v.Field(i)
+			if strings.Contains(opts, "omitempty") && fv.IsZero() {
+				continue
+			}
+			out[name] = scrub(fv)
+		}
+		return out
+	default:
+		return v.Interface()
+	}
 }
