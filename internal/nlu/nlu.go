@@ -250,6 +250,8 @@ var rules = []rule{
 	{"query_stock", regexp.MustCompile(`(?i)^(.+?)\s+(?:stok(?:u|ta)?|stock)(?:\s+(?:ne kadar|kaç|var m[ıi]|durumu))?\??$`), []string{"product"}},
 	// overdue
 	{"query_overdue", regexp.MustCompile(`(?i)(?:vadesi\s+geçen|vadesi\s+gecen|geciken\s+(?:alacak|ödeme|fatura)|overdue)`), nil},
+	// cash forecast
+	{"cash_forecast", regexp.MustCompile(`(?i)(?:nakit\s+akış|nakit\s+tahmin|kasa\s+(?:ne\s+zaman\s+)?eksi|kasa\s+tahmin|para\s+yeter\s+mi|cash\s*flow|cash\s+forecast)`), nil},
 	// reports
 	{"query_report", regexp.MustCompile(`(?i)(?:haftalık\s+(?:rapor|kâr|kar)|kâr\s*(?:-|ve)?\s*zarar|kar\s*(?:-|ve)?\s*zarar|weekly\s+(?:report|p&l|pnl))`), nil},
 	{"query_report", regexp.MustCompile(`(?i)(?:kdv\s+(?:tahmini|durumu|raporu)|aylık\s+kdv|ne\s+kadar\s+kdv|vat\s+estimate)`), nil},

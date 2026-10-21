@@ -124,6 +124,8 @@ func builtins() []Capability {
 		{Name: "query_low_stock", Description: "List products below minimum stock", Run: runLowStock},
 		{Name: "query_overdue", Description: "List overdue receivables", Run: runOverdue},
 		{Name: "daily_summary", Description: "Today's sales, collections, payments and expenses", Run: runSummary},
+		{Name: "import_bank_statement", Description: "Import a bank statement (CSV, Excel, PDF) and match movements to customers and invoices", Write: true, Run: runBankImport},
+		{Name: "cash_forecast", Description: "Project cash for the next 30 days and warn if it may go negative", Run: runCashForecast},
 		{Name: "query_report", Description: "Weekly profit and loss, monthly VAT estimate or daily digest", Args: []string{"kind"}, Run: runReport},
 		{Name: "help", Description: "Explain what the assistant can do", Run: func(_ context.Context, _ *Engine, c *Call) (Outcome, error) {
 			return Outcome{Text: T(c.Lang, "help")}, nil

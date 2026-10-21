@@ -73,6 +73,13 @@ type Summary struct {
 	Orders      int          `json:"orders"`
 }
 
+// Due is an expected cash movement.
+type Due struct {
+	Date        time.Time    `json:"date"`
+	Amount      domain.Money `json:"amount"` // + incoming, − outgoing
+	Description string       `json:"description"`
+}
+
 // Allocation closes (part of) an open invoice with a collection.
 type Allocation struct {
 	InvoiceNo string       `json:"invoice_no"`
@@ -88,6 +95,7 @@ const (
 	RecordExpense    RecordKind = "expense"    // gider / alış faturası
 	RecordOrder      RecordKind = "order"      // B2B sipariş
 	RecordCustom     RecordKind = "custom"     // produced by a plugin capability
+	RecordBatch      RecordKind = "batch"      // several records committed together (bank import)
 )
 
 // Line is an item line on an expense or order.
@@ -114,6 +122,10 @@ type Record struct {
 	VAT        domain.Money `json:"vat,omitempty"`
 	Lines      []Line       `json:"lines,omitempty"`
 	Note       string       `json:"note,omitempty"`
+	// Items holds the records of a batch.
+	Items []Record `json:"items,omitempty"`
+	// Reference is an external reference (bank receipt number, document id).
+	Reference string `json:"reference,omitempty"`
 	// Allocations match a collection to open invoices (computed by ledgerbot).
 	Allocations []Allocation  `json:"allocations,omitempty"`
 	ActorID     domain.UserID `json:"actor_id"`
@@ -130,6 +142,10 @@ type Provider interface {
 	DailySummary(ctx context.Context, c domain.CompanyID, day time.Time) (Summary, error)
 	// PeriodSummary aggregates [from, to).
 	PeriodSummary(ctx context.Context, c domain.CompanyID, from, to time.Time) (Summary, error)
+	// CashPosition is the current cash and bank balance.
+	CashPosition(ctx context.Context, c domain.CompanyID) (domain.Money, error)
+	// Upcoming lists expected cash movements due before until (receivables +, payables −).
+	Upcoming(ctx context.Context, c domain.CompanyID, until time.Time) ([]Due, error)
 	// OpenInvoices lists a customer's unpaid invoices, oldest due date first.
 	OpenInvoices(ctx context.Context, c domain.CompanyID, customerID string) ([]OverdueItem, error)
 	// Commit writes a record. It must be idempotent on Record.DraftID.

@@ -167,6 +167,31 @@ func (d *Driver) OpenInvoices(ctx context.Context, c domain.CompanyID, customerI
 	return out, nil
 }
 
+func (d *Driver) CashPosition(ctx context.Context, c domain.CompanyID) (domain.Money, error) {
+	var out struct {
+		Balance domain.Money `json:"balance"`
+	}
+	err := d.do(ctx, http.MethodGet, cpath(c, "/cash"), nil, nil, &out, "")
+	return out.Balance, err
+}
+
+func (d *Driver) Upcoming(ctx context.Context, c domain.CompanyID, until time.Time) ([]dataprovider.Due, error) {
+	var raw []struct {
+		Date        string       `json:"date"`
+		Amount      domain.Money `json:"amount"`
+		Description string       `json:"description"`
+	}
+	if err := d.do(ctx, http.MethodGet, cpath(c, "/cash/upcoming"), url.Values{"until": {until.Format("2006-01-02")}}, nil, &raw, ""); err != nil {
+		return nil, err
+	}
+	out := make([]dataprovider.Due, len(raw))
+	for i, r := range raw {
+		out[i].Date, _ = time.Parse("2006-01-02", r.Date)
+		out[i].Amount, out[i].Description = r.Amount, r.Description
+	}
+	return out, nil
+}
+
 func (d *Driver) Commit(ctx context.Context, c domain.CompanyID, r dataprovider.Record) (string, error) {
 	var out struct {
 		ExternalID string `json:"external_id"`

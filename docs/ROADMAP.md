@@ -23,6 +23,17 @@ Each item ships as its own pull request with CI green.
 - **OpenTelemetry traces**: HTTP request → queued job → assistant → capability → AI
   call, propagated through job args; enabled with `OTEL_EXPORTER_OTLP_ENDPOINT`.
 
+- **Bank statement import**: CSV and Excel (header detection, Borç/Alacak or
+  signed Tutar, Windows-1254) parsed without AI, PDF through the extraction model.
+  Movements are matched to customers by invoice number, name in the description or
+  a unique open-invoice amount, and committed as one batch draft.
+- **Cash-flow forecast**: 30-day projection from cash position and upcoming
+  receivables/payables; "nakit akışı" on demand, `cash_forecast` scheduled check
+  that only messages when cash may go negative.
+- **Anomaly detection**: amounts far above a counterparty's median and same-amount
+  repeats within a week are flagged; flagged records always ask for approval and
+  emit `anomaly.detected`.
+
 ## Next
 
 - **Document indexing**: index extracted receipts and e-invoices into RAG.
@@ -30,12 +41,6 @@ Each item ships as its own pull request with CI green.
   bounded tool loop and per-step permission checks.
 - **IMAP listener** for mailboxes (the e-mail driver already accepts inbound-parse webhooks and sends via SMTP).
 - **Company switching** for users that belong to several companies on a central number.
-
-## Accounting
-
-- **Bank statement import** (PDF / Excel) with transaction matching.
-- **Cash-flow forecast**: "your cash may go negative in the next 30 days".
-- **Anomaly detection**: unusual amounts, frequently repeated expenses.
 
 ## Later
 

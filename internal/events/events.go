@@ -28,13 +28,14 @@ const (
 	SettingsChanged = "settings.changed"
 
 	// Outbound (ledgerbot).
-	DraftCreated   = "draft.created"
-	DraftCommitted = "draft.committed"
-	DraftRejected  = "draft.rejected"
-	DraftDuplicate = "draft.duplicate"
-	MessageHandled = "message.handled"
-	AlertSent      = "alert.sent"
-	DeletionDone   = "deletion.completed"
+	DraftCreated    = "draft.created"
+	DraftCommitted  = "draft.committed"
+	DraftRejected   = "draft.rejected"
+	DraftDuplicate  = "draft.duplicate"
+	MessageHandled  = "message.handled"
+	AlertSent       = "alert.sent"
+	DeletionDone    = "deletion.completed"
+	AnomalyDetected = "anomaly.detected"
 )
 
 // Event is the envelope.

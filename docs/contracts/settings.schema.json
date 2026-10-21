@@ -173,7 +173,7 @@
     },
     "reports": {
       "type": "array",
-      "description": "Scheduled reports sent to users with the given roles, once per period.",
+      "description": "Scheduled reports sent to users with the given roles, once per period. cash_forecast is checked daily and sent only when cash may go negative within 30 days.",
       "items": {
         "type": "object",
         "required": [
@@ -185,7 +185,8 @@
             "enum": [
               "daily_digest",
               "weekly_pnl",
-              "monthly_vat"
+              "monthly_vat",
+              "cash_forecast"
             ]
           },
           "at": {

@@ -39,24 +39,24 @@ func (l PGLedger) Append(ctx context.Context, draftID string, es []Entry) (bool,
 func (l PGLedger) Totals(ctx context.Context, c domain.CompanyID) (Totals, error) {
 	t := newTotals()
 	rows, err := l.DB.Query(ctx, `
-		SELECT kind = 'allocation', customer_id, product_id, ref, SUM(amount), SUM(quantity)
+		SELECT kind, customer_id, product_id, ref, SUM(amount), SUM(quantity)
 		FROM fake_ledger WHERE company_id = $1
-		GROUP BY kind = 'allocation', customer_id, product_id, ref`, string(c))
+		GROUP BY kind, customer_id, product_id, ref`, string(c))
 	if err != nil {
 		return t, err
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var alloc bool
-		var cust, prod, ref string
+		var kind, cust, prod, ref string
 		var amt, qty int64
-		if err := rows.Scan(&alloc, &cust, &prod, &ref, &amt, &qty); err != nil {
+		if err := rows.Scan(&kind, &cust, &prod, &ref, &amt, &qty); err != nil {
 			return t, err
 		}
-		if alloc {
+		if dataprovider.RecordKind(kind) == RecordAllocation {
 			t.Allocated[ref] += domain.Money(amt)
 			continue
 		}
+		t.Cash += cashEffect(dataprovider.RecordKind(kind), domain.Money(amt))
 		if cust != "" {
 			t.CustomerDelta[cust] += domain.Money(amt)
 		}

@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/furkanmeclis/ledgerbot/internal/ai"
+	"github.com/furkanmeclis/ledgerbot/internal/bank"
 	"github.com/furkanmeclis/ledgerbot/internal/dataprovider"
 	"github.com/furkanmeclis/ledgerbot/internal/domain"
 	"github.com/furkanmeclis/ledgerbot/internal/events"
@@ -117,7 +118,11 @@ func (e *Engine) Handle(ctx context.Context, msg domain.InboundMessage) (Reply, 
 	case domain.KindImage, domain.KindDocument:
 		call.Args = map[string]string{}
 		reply.Language = call.Lang
-		e.runCapability(ctx, call, "record_expense", &reply)
+		capName := "record_expense"
+		if m := msg.Media; m != nil && !strings.HasPrefix(m.MIME, "image/") && bank.Looks(m.MIME, m.Filename, msg.Text) {
+			capName = "import_bank_statement"
+		}
+		e.runCapability(ctx, call, capName, &reply)
 		return reply, nil
 	}
 
@@ -247,6 +252,12 @@ func (e *Engine) saveDraft(ctx context.Context, call *Call, capability string, o
 	}
 	mode := call.Snap.EffectiveSaveMode(call.Actor.Role)
 	rec := *out.Record
+	if warn := e.anomalies(ctx, call, capability, rec); len(warn) > 0 {
+		out.Text = strings.TrimSpace(strings.Join(warn, "\n") + "\n" + out.Text)
+		if mode == domain.SaveAuto {
+			mode = domain.SaveAskApproval // unusual records always ask first
+		}
+	}
 	rec.DraftID, rec.ActorID = id, call.Actor.UserID
 	payload, _ := json.Marshal(rec)
 	d := domain.Draft{

@@ -148,6 +148,26 @@ paths:
           content:
             application/json:
               schema: { type: object, properties: { day: { type: string }, sales: { type: integer }, collections: { type: integer }, payments: { type: integer }, expenses: { type: integer }, output_vat: { type: integer }, input_vat: { type: integer }, orders: { type: integer } } }
+  /companies/{company}/cash:
+    get:
+      summary: Current cash and bank balance
+      parameters: [{ name: company, in: path, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: Balance, content: { application/json: { schema: { type: object, properties: { balance: { type: integer } } } } } }
+  /companies/{company}/cash/upcoming:
+    get:
+      summary: Expected cash movements (receivables positive, payables negative) until a date
+      parameters:
+        - { name: company, in: path, required: true, schema: { type: string } }
+        - { name: until, in: query, required: true, schema: { type: string, format: date } }
+      responses:
+        '200':
+          description: Dues
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { type: object, properties: { date: { type: string, format: date }, amount: { type: integer }, description: { type: string } } }
   /companies/{company}/records:
     post:
       summary: Commit a record (collection, payment, expense, order)
@@ -160,7 +180,9 @@ paths:
               type: object
               required: [kind, draft_id, amount, date]
               properties:
-                kind: { type: string, enum: [collection, payment, expense, order] }
+                kind: { type: string, enum: [collection, payment, expense, order, custom, batch] }
+                items: { type: array, description: 'batch only: the records to commit together (e.g. a bank statement import)', items: { type: object } }
+                reference: { type: string, description: 'external reference, e.g. bank receipt number' }
                 draft_id: { type: string }
                 actor_id: { type: string }
                 customer_id: { type: string }
