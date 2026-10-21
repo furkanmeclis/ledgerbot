@@ -28,9 +28,9 @@ jobs:
         run: test -z "$(gofmt -l .)" || (gofmt -l . && exit 1)
       - name: go vet
         run: go vet ./...
-      - uses: golangci/golangci-lint-action@v8
-        with:
-          version: v2.5.0
+      - name: golangci-lint
+        # Built with the project's Go toolchain (prebuilt binaries may lag behind go.mod).
+        run: go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.5.0 run ./...
 
   test:
     runs-on: ${{ fromJSON(vars.CI_RUNS_ON || '["self-hosted","ledgerbot"]') }}
