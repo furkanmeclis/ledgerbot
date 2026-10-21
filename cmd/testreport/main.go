@@ -253,7 +253,7 @@ func findings(r *report, s summary) []string {
 			f = append(f, fmt.Sprintf("Profile %s: the kernel OOM killer fired %d time(s) inside the memory limit (restarts: %d); worst error rate %.1f%%.", c.Profile, c.OOMKills, c.Restarts, c.WorstErrRate*100))
 		}
 		if len(c.AtLimit) > 0 {
-			f = append(f, fmt.Sprintf("Profile %s: %s reached its memory limit during the run.", c.Profile, strings.Join(c.AtLimit, ", ")))
+			f = append(f, fmt.Sprintf("Profile %s: these containers hit their memory limit during the run: %s.", c.Profile, strings.Join(c.AtLimit, ", ")))
 		}
 		if c.SaturationVUs > 0 && c.MaxSLOVUs > 0 {
 			f = append(f, fmt.Sprintf("Profile %s keeps the service level up to %d parallel clients and breaks it at %d.", c.Profile, c.MaxSLOVUs, c.SaturationVUs))
