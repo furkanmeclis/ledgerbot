@@ -17,14 +17,17 @@ Each item ships as its own pull request with CI green.
   digest, on demand ("haftalık rapor", "KDV tahmini") or scheduled per company
   (`settings.reports`, local time zone, sent once per period and user).
 
+- **Plugin capabilities**: `settings.plugins` declares HTTPS capabilities with
+  optional regex patterns (no AI needed), signed requests, permission checks and
+  save modes like built-ins.
+- **OpenTelemetry traces**: HTTP request → queued job → assistant → capability → AI
+  call, propagated through job args; enabled with `OTEL_EXPORTER_OTLP_ENDPOINT`.
+
 ## Next
 
 - **Document indexing**: index extracted receipts and e-invoices into RAG.
 - **Multi-step plans with the LLM**: chained commands beyond the rule parser, with a
   bounded tool loop and per-step permission checks.
-- **Plugin capabilities**: register capabilities as webhooks from settings
-  (`capabilities: [{name, url, secret, write}]`).
-- **OpenTelemetry traces** next to the existing Prometheus metrics.
 - **IMAP listener** for mailboxes (the e-mail driver already accepts inbound-parse webhooks and sends via SMTP).
 - **Company switching** for users that belong to several companies on a central number.
 

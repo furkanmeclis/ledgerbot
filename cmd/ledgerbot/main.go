@@ -44,10 +44,14 @@ import (
 	"github.com/furkanmeclis/ledgerbot/internal/rag"
 	"github.com/furkanmeclis/ledgerbot/internal/secretbox"
 	"github.com/furkanmeclis/ledgerbot/internal/store"
+	"github.com/furkanmeclis/ledgerbot/internal/telemetry"
 	"github.com/furkanmeclis/ledgerbot/internal/tenant"
 	"github.com/furkanmeclis/ledgerbot/internal/worker"
 	"github.com/furkanmeclis/ledgerbot/migrations"
 )
+
+// version is set at build time: -ldflags "-X main.version=..."
+var version = "dev"
 
 func main() {
 	mode := "all"
@@ -71,6 +75,15 @@ func run(mode string) error {
 	log := newLogger(cfg.LogLevel)
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	shutdownTracing, err := telemetry.Setup(ctx, "ledgerbot-"+mode, version)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		c, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = shutdownTracing(c)
+	}()
 
 	pcfg, err := pgxpool.ParseConfig(cfg.DatabaseURL)
 	if err != nil {

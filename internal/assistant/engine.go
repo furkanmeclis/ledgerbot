@@ -24,7 +24,11 @@ import (
 	"github.com/furkanmeclis/ledgerbot/internal/fx"
 	"github.com/furkanmeclis/ledgerbot/internal/nlu"
 	"github.com/furkanmeclis/ledgerbot/internal/store"
+	"github.com/furkanmeclis/ledgerbot/internal/telemetry"
 	"github.com/furkanmeclis/ledgerbot/internal/tenant"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // Tenants returns the settings + permission snapshot for a company.
@@ -72,6 +76,12 @@ func (e *Engine) now() time.Time {
 
 // Handle processes one inbound message end to end.
 func (e *Engine) Handle(ctx context.Context, msg domain.InboundMessage) (Reply, error) {
+	ctx, span := telemetry.Tracer().Start(ctx, "assistant.handle", trace.WithAttributes(
+		attribute.String("ledgerbot.company", string(msg.CompanyID)),
+		attribute.String("ledgerbot.channel", string(msg.Channel)),
+		attribute.String("ledgerbot.kind", string(msg.Kind)),
+	))
+	defer span.End()
 	snap, err := e.Tenants.Get(ctx, msg.CompanyID)
 	if err != nil {
 		return Reply{}, err
@@ -138,7 +148,10 @@ func (e *Engine) Handle(ctx context.Context, msg domain.InboundMessage) (Reply, 
 		return reply, nil
 	}
 
-	parser := &nlu.Parser{Capabilities: e.Caps.Docs(), Instruction: snap.SystemPrompt(actor.Role)}
+	parser := &nlu.Parser{Capabilities: e.docs(snap), Instruction: snap.SystemPrompt(actor.Role)}
+	if len(snap.Settings.Plugins) > 0 {
+		parser.Before = func(text string) (nlu.Intent, bool) { return matchPlugins(snap, text) }
+	}
 	allowLLM := e.quotaOK(ctx, snap)
 	if allowLLM {
 		if m, err := e.AI.LLM(ai.PurposeAgent, snap.Settings.Providers.Agent); err == nil {
@@ -172,11 +185,13 @@ func (e *Engine) Handle(ctx context.Context, msg domain.InboundMessage) (Reply, 
 }
 
 func (e *Engine) runCapability(ctx context.Context, call *Call, name string, reply *Reply) {
+	ctx, span := telemetry.Tracer().Start(ctx, "capability."+name)
+	defer span.End()
 	if name == "unknown" || name == "" {
 		reply.add(T(call.Lang, "unknown_intent"))
 		return
 	}
-	capb, ok := e.Caps.Get(name)
+	capb, ok := e.capability(call.Snap, name)
 	if !ok {
 		reply.add(T(call.Lang, "unknown_intent"))
 		return
@@ -191,6 +206,8 @@ func (e *Engine) runCapability(ctx context.Context, call *Call, name string, rep
 	}
 	out, err := capb.Run(ctx, e, call)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		e.Log.Error("capability failed", "capability", name, "company", call.Actor.CompanyID, "err", err)
 		reply.add(T(call.Lang, "error"))
 		return

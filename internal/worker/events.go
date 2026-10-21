@@ -3,9 +3,6 @@ package worker
 import (
 	"bytes"
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -23,6 +20,7 @@ import (
 	"github.com/furkanmeclis/ledgerbot/internal/events"
 	"github.com/furkanmeclis/ledgerbot/internal/metrics"
 	"github.com/furkanmeclis/ledgerbot/internal/queue"
+	"github.com/furkanmeclis/ledgerbot/internal/sign"
 	"github.com/furkanmeclis/ledgerbot/internal/store"
 	"github.com/furkanmeclis/ledgerbot/internal/tenant"
 )
@@ -157,15 +155,8 @@ type webhookWorker struct {
 
 var webhookClient = &http.Client{Timeout: 10 * time.Second}
 
-// Sign returns the X-Ledgerbot-Signature header value: t=<unix>,v1=<hex hmac(secret, t + "." + body)>.
-func Sign(secret string, t int64, body []byte) string {
-	mac := hmac.New(sha256.New, []byte(secret))
-	ts := strconv.FormatInt(t, 10)
-	mac.Write([]byte(ts))
-	mac.Write([]byte{'.'})
-	mac.Write(body)
-	return "t=" + ts + ",v1=" + hex.EncodeToString(mac.Sum(nil))
-}
+// Sign returns the X-Ledgerbot-Signature header value (see package sign).
+func Sign(secret string, t int64, body []byte) string { return sign.Make(secret, t, body) }
 
 func (w *webhookWorker) Work(ctx context.Context, job *river.Job[queue.WebhookArgs]) error {
 	body, err := json.Marshal(job.Args.Event)

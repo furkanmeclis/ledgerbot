@@ -19,6 +19,7 @@ import (
 	"github.com/furkanmeclis/ledgerbot/internal/queue"
 	"github.com/furkanmeclis/ledgerbot/internal/secretbox"
 	"github.com/furkanmeclis/ledgerbot/internal/store"
+	"github.com/furkanmeclis/ledgerbot/internal/telemetry"
 )
 
 // Listeners runs Poller drivers (Telegram long polling, IMAP) for connections
@@ -185,7 +186,7 @@ func (l *Listeners) stopAll() {
 // Accept stores media as a blob and enqueues the message. Used by webhooks,
 // pollers and the REST API.
 func Accept(ctx context.Context, st store.Store, q queue.Enqueuer, m domain.InboundMessage) error {
-	args := queue.InboundArgs{Msg: m}
+	args := queue.InboundArgs{Msg: m, Trace: telemetry.Inject(ctx)}
 	if m.Media != nil && len(m.Media.Data) > 0 {
 		id := events.NewID("blob")
 		if err := st.PutBlob(ctx, id, m.Media.Data, 24*time.Hour); err != nil {

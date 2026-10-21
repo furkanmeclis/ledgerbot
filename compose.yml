@@ -72,5 +72,14 @@ services:
       - api
     restart: unless-stopped
 
+  # Optional tracing UI: docker compose --profile observability up -d
+  # and set OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318 in .env
+  jaeger:
+    image: jaegertracing/jaeger:2.10.0
+    profiles: ["observability"]
+    ports:
+      - "16686:16686"
+    restart: unless-stopped
+
 volumes:
   pgdata:

@@ -97,6 +97,8 @@ type Parser struct {
 	// Instruction is the host-provided system prompt (company + role). It is
 	// added as context; the JSON output contract always comes from ledgerbot.
 	Instruction string
+	// Before is tried after the built-in rules and before the LLM (plugin patterns).
+	Before func(text string) (Intent, bool)
 }
 
 // CapabilityDoc describes a capability to the LLM.
@@ -111,6 +113,11 @@ func (p *Parser) Parse(ctx context.Context, text string, allowLLM bool) (Result,
 	lang := DetectLanguage(text)
 	if intents := ParseRules(text); len(intents) > 0 {
 		return Result{Intents: intents, Language: lang}, nil
+	}
+	if p.Before != nil {
+		if in, ok := p.Before(text); ok {
+			return Result{Intents: []Intent{in}, Language: lang}, nil
+		}
 	}
 	if !allowLLM || p.LLM == nil {
 		return Result{Intents: []Intent{{Capability: "unknown", Source: "rules"}}, Language: lang}, nil
