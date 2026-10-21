@@ -75,16 +75,16 @@ func main() {
 		}
 	}
 
-	if err := os.MkdirAll(*out, 0o755); err != nil {
+	if err := os.MkdirAll(*out, 0o750); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 	page := renderHTML(r)
-	must(os.WriteFile(filepath.Join(*out, "index.html"), []byte(page), 0o644))
+	must(os.WriteFile(filepath.Join(*out, "index.html"), []byte(page), 0o600))
 	sum := summarize(r)
 	j, _ := json.MarshalIndent(sum, "", "  ")
-	must(os.WriteFile(filepath.Join(*out, "summary.json"), j, 0o644))
-	must(os.WriteFile(filepath.Join(*out, "summary.md"), []byte(markdown(r, sum)), 0o644))
+	must(os.WriteFile(filepath.Join(*out, "summary.json"), j, 0o600))
+	must(os.WriteFile(filepath.Join(*out, "summary.md"), []byte(markdown(r, sum)), 0o600))
 	fmt.Printf("report: %s (tests %d passed, %d failed, %d skipped; %d perf profiles)\n",
 		filepath.Join(*out, "index.html"), sum.Passed, sum.Failed, sum.Skipped, len(r.Profiles))
 }
