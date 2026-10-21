@@ -9,3 +9,4 @@ coverage.*
 /loadtest/seed/
 /dashboard/node_modules/
 /dashboard/dist/
+/reports/

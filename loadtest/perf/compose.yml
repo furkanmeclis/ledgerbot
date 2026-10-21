@@ -1,0 +1,97 @@
+# Memory-budgeted stack for the heavy performance suite (scripts/perf/run-profiles.sh).
+# It is independent of the root compose.yml: own project name, own network, no
+# host port for PostgreSQL, so it can run next to a dev stack. Every limit comes
+# from the environment the runner computes per RAM profile.
+name: ${PERF_PROJECT:-ledgerbot-perf}
+
+x-go: &go
+  image: ${PERF_IMAGE:-ledgerbot:perf}
+  environment: &goenv
+    LEDGERBOT_DATABASE_URL: postgres://ledgerbot:ledgerbot@postgres:5432/ledgerbot?sslmode=disable
+    LEDGERBOT_DEV: "true"
+    LEDGERBOT_ADMIN_TOKEN: perf
+    LEDGERBOT_SEED_DIR: /app/loadseed
+    LEDGERBOT_TENANT_SOURCE: file
+    LEDGERBOT_DATA_DRIVER: fake
+    LEDGERBOT_FX_SOURCE: static
+    LEDGERBOT_RATE_RPS: "0"
+    LEDGERBOT_TENANT_TTL: 5m
+    LEDGERBOT_LOG_LEVEL: warn
+    LEDGERBOT_DB_MAX_CONNS: ${PERF_DB_MAX_CONNS:-40}
+    LEDGERBOT_WORKER_CONCURRENCY: ${PERF_WORKER_CONCURRENCY:-64}
+  volumes:
+    - ${PERF_SEED_DIR:-../seed}:/app/loadseed:ro
+  depends_on:
+    migrate:
+      condition: service_completed_successfully
+  restart: unless-stopped
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_USER: ledgerbot
+      POSTGRES_PASSWORD: ledgerbot
+      POSTGRES_DB: ledgerbot
+    command:
+      - postgres
+      - -c
+      - max_connections=${PERF_PG_MAX_CONNS:-300}
+      - -c
+      - shared_buffers=${PERF_PG_SHARED_BUFFERS:-256MB}
+      - -c
+      - effective_cache_size=${PERF_PG_CACHE:-512MB}
+      - -c
+      - work_mem=4MB
+      - -c
+      - synchronous_commit=off
+    mem_limit: ${PERF_PG_MEM:-1g}
+    memswap_limit: ${PERF_PG_MEM:-1g}
+    shm_size: 256m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U ledgerbot -d ledgerbot"]
+      interval: 2s
+      timeout: 3s
+      retries: 60
+    restart: unless-stopped
+
+  migrate:
+    image: ${PERF_IMAGE:-ledgerbot:perf}
+    environment:
+      LEDGERBOT_DATABASE_URL: postgres://ledgerbot:ledgerbot@postgres:5432/ledgerbot?sslmode=disable
+      LEDGERBOT_DEV: "true"
+    command: ["migrate"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    <<: *go
+    command: ["api"]
+    environment:
+      <<: *goenv
+      GOMEMLIMIT: ${PERF_API_GOMEMLIMIT:-400MiB}
+    mem_limit: ${PERF_API_MEM:-512m}
+    memswap_limit: ${PERF_API_MEM:-512m}
+    deploy:
+      replicas: ${PERF_API_REPLICAS:-2}
+
+  worker:
+    <<: *go
+    command: ["worker"]
+    environment:
+      <<: *goenv
+      GOMEMLIMIT: ${PERF_WORKER_GOMEMLIMIT:-400MiB}
+    mem_limit: ${PERF_WORKER_MEM:-512m}
+    memswap_limit: ${PERF_WORKER_MEM:-512m}
+    deploy:
+      replicas: ${PERF_WORKER_REPLICAS:-3}
+
+  gateway:
+    image: caddy:2.10-alpine
+    command: ["caddy", "reverse-proxy", "--from", ":8080", "--to", "api:8080"]
+    mem_limit: ${PERF_GATEWAY_MEM:-96m}
+    depends_on:
+      - api
+    restart: unless-stopped
