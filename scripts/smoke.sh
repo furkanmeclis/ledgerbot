@@ -14,7 +14,7 @@ echo "== ask approval"; out=$(post /v1/dev/messages '{"sender":"accountant","tex
 echo "== approve";      out=$(post /v1/dev/messages '{"sender":"accountant","text":"evet"}'); expect '"status":"committed"' "$out"
 echo "== permission";   out=$(post /v1/dev/messages '{"sender":"sales","text":"Mehmet'"'"'e 100 TL ödeme yaptım"}'); expect 'yetkiniz yok' "$out"
 echo "== chain";        out=$(post /v1/dev/messages '{"sender":"owner","text":"Ahmet Yılmaz'"'"'a ekstre at ve vadesi geçenleri göster"}'); expect 'ekstresi' "$out"
-echo "== voice (fake STT)"; audio=$(printf '%s' "gün sonu özeti" | base64)
+echo "== voice (fake STT)"; audio=$(printf '%s' "gün sonu özeti" | base64 | tr -d "\n")
 out=$(post /v1/dev/messages '{"sender":"owner","media":{"mime":"audio/ogg","data":"'"$audio"'"}}'); expect 'özeti' "$out"
 echo "== async queue";  post /v1/dev/messages '{"sender":"owner","text":"kritik stok","async":true}' >/dev/null
 for i in $(seq 1 30); do
@@ -34,7 +34,7 @@ done
 expect 'Demir' "$out"
 echo "== reports";      out=$(post /v1/dev/messages '{"sender":"owner","text":"haftalık rapor"}'); expect 'Haftalık' "$out"
 out=$(post /v1/dev/messages '{"sender":"accountant","text":"KDV tahmini"}'); expect 'KDV' "$out"
-echo "== bank import";  csv=$(printf 'Tarih;Açıklama;Tutar\n01.10.2026;FAST GELEN AHMET YILMAZ %s;1.000,00\n02.10.2026;BILINMEYEN;-50,00\n' "$(date +%s)" | base64)
+echo "== bank import";  csv=$(printf 'Tarih;Açıklama;Tutar\n01.10.2026;FAST GELEN AHMET YILMAZ %s;1.000,00\n02.10.2026;BILINMEYEN;-50,00\n' "$(date +%s)" | base64 | tr -d "\n")
 out=$(post /v1/dev/messages '{"sender":"owner","media":{"mime":"text/csv","filename":"ekstre.csv","data":"'"$csv"'"}}'); expect 'Banka ekstresi' "$out"
 echo "== cash forecast"; out=$(post /v1/dev/messages '{"sender":"owner","text":"nakit akışı"}'); expect 'akit' "$out"
 echo "== usage";        out=$(curl -fsS "$BASE/v1/usage" "${H[@]}"); expect total_calls "$out"
