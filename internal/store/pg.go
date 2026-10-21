@@ -381,6 +381,21 @@ func (p *PG) ListDev(ctx context.Context, c domain.CompanyID, to string, limit i
 	return out, rows.Err()
 }
 
+func (p *PG) SetActiveCompany(ctx context.Context, ch domain.ChannelKind, addr string, c domain.CompanyID) error {
+	_, err := p.DB.Exec(ctx, `INSERT INTO active_companies (channel, address, company_id) VALUES ($1,$2,$3)
+		ON CONFLICT (channel, address) DO UPDATE SET company_id = EXCLUDED.company_id, updated_at = now()`, string(ch), addr, string(c))
+	return err
+}
+
+func (p *PG) ActiveCompany(ctx context.Context, ch domain.ChannelKind, addr string) (domain.CompanyID, error) {
+	var c string
+	err := p.DB.QueryRow(ctx, `SELECT company_id FROM active_companies WHERE channel = $1 AND address = $2`, string(ch), addr).Scan(&c)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	return domain.CompanyID(c), err
+}
+
 func nullJSON(b json.RawMessage) any {
 	if len(b) == 0 {
 		return nil

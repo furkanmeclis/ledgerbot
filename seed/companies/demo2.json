@@ -1,0 +1,66 @@
+{
+  "settings": {
+    "version": 1,
+    "company_name": "Yılmaz Gıda Ltd.",
+    "save_mode": "ask_approval",
+    "locale": "tr-TR",
+    "ai_daily_limit": 200,
+    "api_keys": [
+      {
+        "id": "demo2-key",
+        "sha256": "b63f3b88f2142913f5991a9413d8ba1b5506b2ec8f601e50b90662c8883f0cc8",
+        "scopes": [
+          "*"
+        ]
+      }
+    ],
+    "rules": [
+      {
+        "event": "stock.low",
+        "notify_roles": [
+          "owner"
+        ],
+        "throttle": "6h"
+      }
+    ],
+    "timezone": "Europe/Istanbul"
+  },
+  "permissions": {
+    "version": 1,
+    "roles": {
+      "owner": {
+        "capabilities": [
+          "*"
+        ]
+      },
+      "staff": {
+        "capabilities": [
+          "query_*",
+          "help"
+        ],
+        "scope": "own"
+      }
+    },
+    "users": [
+      {
+        "id": "u2-owner",
+        "name": "Furkan",
+        "role": "owner",
+        "addresses": {
+          "dev": "owner",
+          "wuzapi": "+905320000001",
+          "telegram": "100000001"
+        }
+      },
+      {
+        "id": "u2-staff",
+        "name": "Kaan Depo",
+        "role": "staff",
+        "addresses": {
+          "dev": "staff",
+          "wuzapi": "+905320000009"
+        }
+      }
+    ]
+  }
+}

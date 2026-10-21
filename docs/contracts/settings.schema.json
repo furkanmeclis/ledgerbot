@@ -11,6 +11,10 @@
     "company_id": {
       "type": "string"
     },
+    "company_name": {
+      "type": "string",
+      "description": "Display name, used when a user on a central number switches companies."
+    },
     "version": {
       "type": "integer",
       "description": "Monotonic version for change detection."

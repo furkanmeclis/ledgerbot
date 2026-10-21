@@ -224,7 +224,8 @@ paths:
         - telegram: `{bot_token, mode: webhook|poll, secret_token}`
         - wuzapi: `{base_url, token, hmac_key}` (mode `per_company` or `central`)
         - waba: `{phone_number_id, access_token, app_secret, verify_token, api_version}`
-        - email: `{address, webhook_secret, smtp_host, smtp_port, smtp_user, smtp_pass}`
+        - email: `{address, webhook_secret, smtp_host, smtp_port, smtp_user, smtp_pass, imap_host, imap_user, imap_pass}`
+          (with `imap_host` a worker polls the mailbox over IMAP/TLS; otherwise mail arrives through the webhook)
         The response contains the `webhook_url` to configure at the provider.
       requestBody:
         content:

@@ -1,6 +1,7 @@
 {
   "settings": {
     "version": 1,
+    "company_name": "Demo Kırtasiye A.Ş.",
     "save_mode": "auto_save",
     "locale": "tr-TR",
     "ai_daily_limit": 500,

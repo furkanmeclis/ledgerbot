@@ -23,6 +23,7 @@ var ErrUnknownCompany = errors.New("tenant: unknown company")
 // Settings is the per-company configuration contract (docs/contracts/settings.schema.json).
 type Settings struct {
 	CompanyID    domain.CompanyID `json:"company_id"`
+	CompanyName  string           `json:"company_name,omitempty"`
 	Version      int64            `json:"version"`
 	SaveMode     domain.SaveMode  `json:"save_mode"`
 	Locale       string           `json:"locale,omitempty"`

@@ -68,47 +68,65 @@ func (Email) Webhook(_ http.ResponseWriter, r *http.Request, c Conn) ([]domain.I
 	if err := json.Unmarshal(raw, &in); err != nil {
 		return nil, nil
 	}
-	addr, err := mail.ParseAddress(in.From)
+	atts := make([]attachment, 0, len(in.Attachments))
+	for _, a := range in.Attachments {
+		data, err := base64.StdEncoding.DecodeString(a.Content)
+		if err != nil {
+			continue
+		}
+		atts = append(atts, attachment{name: a.Filename, mime: a.ContentType, data: data})
+	}
+	return mailToInbound(c, in.MessageID, in.From, in.Subject, in.Text, atts), nil
+}
+
+type attachment struct {
+	name, mime string
+	data       []byte
+}
+
+// mailToInbound converts one e-mail into messages: each attachment is its own
+// document (invoices and statements are usually attached); the body becomes a
+// text message only when there is no attachment.
+func mailToInbound(c Conn, id, from, subject, body string, atts []attachment) []domain.InboundMessage {
+	addr, err := mail.ParseAddress(from)
 	if err != nil {
-		return nil, nil
+		return nil
 	}
 	base := domain.InboundMessage{
 		CompanyID: c.CompanyID, Channel: domain.ChannelEmail, ChannelID: c.ID,
 		Sender: strings.ToLower(addr.Address), ReceivedAt: time.Now().UTC(),
 	}
-	id := in.MessageID
 	if id == "" {
 		id = strconv.FormatInt(time.Now().UnixNano(), 36)
 	}
+	id = strings.Trim(id, "<>")
 	var out []domain.InboundMessage
-	// Each attachment is its own document (invoices are usually attached);
-	// the body becomes a text message only when there is no attachment.
-	for i, a := range in.Attachments {
-		data, err := base64.StdEncoding.DecodeString(a.Content)
-		if err != nil {
-			continue
-		}
-		mt := NormalizeMIME(a.ContentType)
-		if mt == "" {
-			mt = mime.TypeByExtension(strings.ToLower(a.Filename[strings.LastIndexByte(a.Filename, '.')+1:]))
+	for i, a := range atts {
+		mt := NormalizeMIME(a.mime)
+		if mt == "" || mt == "application/octet-stream" {
+			if dot := strings.LastIndexByte(a.name, '.'); dot >= 0 {
+				if guess := NormalizeMIME(mime.TypeByExtension(strings.ToLower(a.name[dot:]))); guess != "" {
+					mt = guess
+				}
+			}
 		}
 		m := base
 		m.ID = fmt.Sprintf("mail_%s_%d", id, i)
 		m.Kind = KindFromMIME(mt)
-		m.Text = in.Subject
-		m.Media = &domain.Media{MIME: mt, Filename: a.Filename, Data: data}
+		m.Text = subject
+		m.Media = &domain.Media{MIME: mt, Filename: a.name, Data: a.data}
 		out = append(out, m)
 	}
 	if len(out) == 0 {
 		m := base
 		m.ID, m.Kind = "mail_"+id, domain.KindText
-		m.Text = strings.TrimSpace(firstParagraph(in.Text))
+		m.Text = strings.TrimSpace(firstParagraph(body))
 		if m.Text == "" {
-			m.Text = in.Subject
+			m.Text = subject
 		}
 		out = append(out, m)
 	}
-	return out, nil
+	return out
 }
 
 // firstParagraph drops quoted replies and signatures.

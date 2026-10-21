@@ -114,3 +114,19 @@ func TestPhoneFromJID(t *testing.T) {
 		}
 	}
 }
+
+func TestParseMailMIME(t *testing.T) {
+	raw := "From: =?utf-8?q?Ay=C5=9Fe?= <Muhasebe@Demo.local>\r\n" +
+		"Subject: Fatura\r\nMessage-ID: <abc@demo>\r\nMIME-Version: 1.0\r\n" +
+		"Content-Type: multipart/mixed; boundary=XX\r\n\r\n" +
+		"--XX\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nekte fatura var\r\n" +
+		"--XX\r\nContent-Type: application/octet-stream\r\nContent-Disposition: attachment; filename=\"f.xml\"\r\n\r\n<Invoice/>\r\n" +
+		"--XX--\r\n"
+	msgs, err := parseMail(conn(domain.ChannelEmail, EmailConfig{}), 7, strings.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs) != 1 || msgs[0].Sender != "muhasebe@demo.local" || msgs[0].Media == nil || msgs[0].Media.Filename != "f.xml" || !strings.Contains(msgs[0].Media.MIME, "xml") || msgs[0].ID != "mail_abc@demo_0" {
+		t.Fatalf("parse: %+v", msgs)
+	}
+}
