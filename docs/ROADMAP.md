@@ -10,13 +10,18 @@ Each item ships as its own pull request with CI green.
   index per embedding dimension, embeddings computed by workers off the hot path,
   answers returned verbatim (no generated text).
 
+- **Payment ↔ invoice matching**: collections are allocated to the customer's open
+  invoices (exact amount first, then oldest due date); the remainder is an advance.
+  Allocations travel with the record to the host.
+- **Reports**: weekly P&L, monthly VAT estimate (output − input VAT) and a morning
+  digest, on demand ("haftalık rapor", "KDV tahmini") or scheduled per company
+  (`settings.reports`, local time zone, sent once per period and user).
+
 ## Next
 
 - **Document indexing**: index extracted receipts and e-invoices into RAG.
 - **Multi-step plans with the LLM**: chained commands beyond the rule parser, with a
   bounded tool loop and per-step permission checks.
-- **Payment ↔ invoice matching**: match incoming payments to open invoices.
-- **Scheduled reports**: weekly P&L summary, monthly VAT estimate, morning digest.
 - **Plugin capabilities**: register capabilities as webhooks from settings
   (`capabilities: [{name, url, secret, write}]`).
 - **OpenTelemetry traces** next to the existing Prometheus metrics.

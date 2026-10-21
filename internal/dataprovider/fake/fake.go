@@ -26,9 +26,14 @@ type Entry struct {
 	CustomerID string
 	ProductID  string
 	Amount     domain.Money
-	Quantity   int64 // thousandths
+	VAT        domain.Money
+	Quantity   int64  // thousandths
+	Ref        string // invoice number for allocations
 	At         time.Time
 }
+
+// RecordAllocation is the ledger kind of an invoice allocation row.
+const RecordAllocation dataprovider.RecordKind = "allocation"
 
 // Ledger persists fake writes.
 type Ledger interface {
@@ -36,14 +41,19 @@ type Ledger interface {
 	Append(ctx context.Context, draftID string, entries []Entry) (inserted bool, err error)
 	// Totals returns per-customer amount sums and per-product quantity sums.
 	Totals(ctx context.Context, c domain.CompanyID) (Totals, error)
-	// Day returns entries of a company on a given day.
-	Day(ctx context.Context, c domain.CompanyID, day time.Time) ([]Entry, error)
+	// Range returns entries of a company in [from, to).
+	Range(ctx context.Context, c domain.CompanyID, from, to time.Time) ([]Entry, error)
 }
 
 // Totals aggregates ledger effects.
 type Totals struct {
 	CustomerDelta map[string]domain.Money // + increases what the customer owes
 	ProductSold   map[string]int64        // thousandths
+	Allocated     map[string]domain.Money // invoice number -> paid amount
+}
+
+func newTotals() Totals {
+	return Totals{CustomerDelta: map[string]domain.Money{}, ProductSold: map[string]int64{}, Allocated: map[string]domain.Money{}}
 }
 
 type world struct {
@@ -178,19 +188,46 @@ func (p *Provider) Balance(ctx context.Context, c domain.CompanyID, id string) (
 	var overdue domain.Money
 	for _, o := range w.overdue {
 		if o.CustomerID == id {
-			overdue += o.Amount
+			overdue += max(o.Amount-t.Allocated[o.InvoiceNo], 0)
 		}
 	}
 	bal := open + t.CustomerDelta[id]
 	return dataprovider.Balance{CustomerID: id, Balance: bal, Overdue: min(overdue, max(bal, 0)), AsOf: p.now()}, nil
 }
 
-func (p *Provider) Overdue(_ context.Context, c domain.CompanyID, limit int) ([]dataprovider.OverdueItem, error) {
-	w := p.world(c)
-	if limit <= 0 || limit > len(w.overdue) {
-		limit = len(w.overdue)
+func (p *Provider) Overdue(ctx context.Context, c domain.CompanyID, limit int) ([]dataprovider.OverdueItem, error) {
+	open, err := p.open(ctx, c, "")
+	if err != nil {
+		return nil, err
 	}
-	return slices.Clone(w.overdue[:limit]), nil
+	if limit > 0 && limit < len(open) {
+		open = open[:limit]
+	}
+	return open, nil
+}
+
+// OpenInvoices returns a customer's unpaid invoices (all seeded invoices are past due).
+func (p *Provider) OpenInvoices(ctx context.Context, c domain.CompanyID, customerID string) ([]dataprovider.OverdueItem, error) {
+	return p.open(ctx, c, customerID)
+}
+
+func (p *Provider) open(ctx context.Context, c domain.CompanyID, customerID string) ([]dataprovider.OverdueItem, error) {
+	w := p.world(c)
+	t, err := p.ledger.Totals(ctx, c)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]dataprovider.OverdueItem, 0, len(w.overdue))
+	for _, it := range w.overdue {
+		if customerID != "" && it.CustomerID != customerID {
+			continue
+		}
+		it.Amount -= t.Allocated[it.InvoiceNo]
+		if it.Amount > 0 {
+			out = append(out, it)
+		}
+	}
+	return out, nil
 }
 
 func (p *Provider) products(ctx context.Context, c domain.CompanyID) ([]dataprovider.Product, error) {
@@ -239,11 +276,18 @@ func (p *Provider) LowStock(ctx context.Context, c domain.CompanyID) ([]dataprov
 }
 
 func (p *Provider) DailySummary(ctx context.Context, c domain.CompanyID, day time.Time) (dataprovider.Summary, error) {
-	entries, err := p.ledger.Day(ctx, c, day)
+	start := time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, day.Location())
+	s, err := p.PeriodSummary(ctx, c, start, start.AddDate(0, 0, 1))
+	s.To = time.Time{}
+	return s, err
+}
+
+func (p *Provider) PeriodSummary(ctx context.Context, c domain.CompanyID, from, to time.Time) (dataprovider.Summary, error) {
+	entries, err := p.ledger.Range(ctx, c, from, to)
 	if err != nil {
 		return dataprovider.Summary{}, err
 	}
-	s := dataprovider.Summary{Day: day.Truncate(24 * time.Hour)}
+	s := dataprovider.Summary{Day: from, To: to}
 	orders := map[string]bool{}
 	for _, e := range entries {
 		switch e.Kind {
@@ -253,8 +297,10 @@ func (p *Provider) DailySummary(ctx context.Context, c domain.CompanyID, day tim
 			s.Payments += e.Amount
 		case dataprovider.RecordExpense:
 			s.Expenses += e.Amount
+			s.InputVAT += e.VAT
 		case dataprovider.RecordOrder:
 			s.Sales += e.Amount
+			s.OutputVAT += e.VAT
 			orders[e.DraftID] = true
 		}
 	}
@@ -270,13 +316,17 @@ func (p *Provider) Commit(ctx context.Context, c domain.CompanyID, r dataprovide
 	switch r.Kind {
 	case dataprovider.RecordCollection:
 		entries = append(entries, Entry{Kind: r.Kind, CustomerID: r.CustomerID, Amount: -r.Amount})
+		for _, a := range r.Allocations {
+			entries = append(entries, Entry{Kind: RecordAllocation, Ref: a.InvoiceNo, Amount: a.Amount})
+		}
 	case dataprovider.RecordPayment:
 		entries = append(entries, Entry{Kind: r.Kind, CustomerID: r.CustomerID, Amount: r.Amount})
 	case dataprovider.RecordExpense:
-		entries = append(entries, Entry{Kind: r.Kind, Amount: r.Amount})
+		entries = append(entries, Entry{Kind: r.Kind, Amount: r.Amount, VAT: r.VAT})
 	case dataprovider.RecordOrder:
 		for _, l := range r.Lines {
-			entries = append(entries, Entry{Kind: r.Kind, CustomerID: r.CustomerID, ProductID: l.ProductID, Amount: l.Total, Quantity: l.Quantity})
+			vat := l.Total - domain.Money(int64(l.Total)*100/int64(100+l.VATRate))
+			entries = append(entries, Entry{Kind: r.Kind, CustomerID: r.CustomerID, ProductID: l.ProductID, Amount: l.Total, VAT: vat, Quantity: l.Quantity})
 		}
 	default:
 		return "", fmt.Errorf("fake: unsupported record kind %q", r.Kind)
@@ -321,9 +371,13 @@ func (m *MemLedger) Append(_ context.Context, draftID string, es []Entry) (bool,
 func (m *MemLedger) Totals(_ context.Context, c domain.CompanyID) (Totals, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	t := Totals{CustomerDelta: map[string]domain.Money{}, ProductSold: map[string]int64{}}
+	t := newTotals()
 	for _, e := range m.entries {
 		if e.CompanyID != c {
+			continue
+		}
+		if e.Kind == RecordAllocation {
+			t.Allocated[e.Ref] += e.Amount
 			continue
 		}
 		if e.CustomerID != "" {
@@ -336,14 +390,12 @@ func (m *MemLedger) Totals(_ context.Context, c domain.CompanyID) (Totals, error
 	return t, nil
 }
 
-func (m *MemLedger) Day(_ context.Context, c domain.CompanyID, day time.Time) ([]Entry, error) {
+func (m *MemLedger) Range(_ context.Context, c domain.CompanyID, from, to time.Time) ([]Entry, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	y, mo, d := day.Date()
 	var out []Entry
 	for _, e := range m.entries {
-		ey, em, ed := e.At.Date()
-		if e.CompanyID == c && ey == y && em == mo && ed == d {
+		if e.CompanyID == c && !e.At.Before(from) && e.At.Before(to) {
 			out = append(out, e)
 		}
 	}

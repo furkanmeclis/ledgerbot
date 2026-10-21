@@ -163,3 +163,34 @@ func (f *FileSource) Lookup(ctx context.Context, ch domain.ChannelKind, address 
 	}
 	return out, nil
 }
+
+// List implements Lister: GET {base}/companies -> {"companies": ["..."]}.
+func (h *HTTPSource) List(ctx context.Context) ([]domain.CompanyID, error) {
+	var out struct {
+		Companies []domain.CompanyID `json:"companies"`
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, h.Base+"/companies", nil)
+	if err != nil {
+		return nil, err
+	}
+	if h.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+h.Token)
+	}
+	cl := h.Client
+	if cl == nil {
+		cl = &http.Client{Timeout: 10 * time.Second}
+	}
+	resp, err := cl.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("tenant: companies: status %d", resp.StatusCode)
+	}
+	err = json.NewDecoder(resp.Body).Decode(&out)
+	return out.Companies, err
+}
+
+// List implements Lister for seed files.
+func (f *FileSource) List(context.Context) ([]domain.CompanyID, error) { return f.Companies() }

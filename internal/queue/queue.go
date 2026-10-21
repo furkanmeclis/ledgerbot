@@ -107,6 +107,14 @@ func (RAGIndexArgs) InsertOpts() river.InsertOpts {
 	return river.InsertOpts{Queue: QueueEvents, MaxAttempts: 6}
 }
 
+// ReportsTickArgs checks which scheduled reports are due.
+type ReportsTickArgs struct{}
+
+func (ReportsTickArgs) Kind() string { return "reports_tick" }
+func (ReportsTickArgs) InsertOpts() river.InsertOpts {
+	return river.InsertOpts{Queue: QueueMaint, MaxAttempts: 1}
+}
+
 // CleanupArgs removes expired rows.
 type CleanupArgs struct{}
 

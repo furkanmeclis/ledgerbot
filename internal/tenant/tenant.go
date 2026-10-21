@@ -33,6 +33,17 @@ type Settings struct {
 	Webhooks     []Webhook        `json:"webhooks,omitempty"`
 	Rules        []Rule           `json:"rules,omitempty"`
 	Prompts      Prompts          `json:"prompts,omitzero"`
+	Reports      []Report         `json:"reports,omitempty"`
+	Timezone     string           `json:"timezone,omitempty"` // IANA, default Europe/Istanbul
+}
+
+// Report schedules a recurring report to users with the given roles.
+type Report struct {
+	Type    string   `json:"type"`              // daily_digest, weekly_pnl, monthly_vat
+	At      string   `json:"at"`                // local time "08:30"
+	Weekday int      `json:"weekday,omitempty"` // weekly: 1 = Monday ... 7 = Sunday (default 5, Friday)
+	Day     int      `json:"day,omitempty"`     // monthly: day of month (default 25)
+	Roles   []string `json:"roles"`
 }
 
 // Prompts lets the host steer the assistant's tone and domain knowledge.
@@ -259,6 +270,11 @@ func Match(pattern, name string) bool {
 	}
 	ok, _ := path.Match(pattern, name)
 	return ok
+}
+
+// Lister enumerates companies (for scheduled reports and the simulator).
+type Lister interface {
+	List(ctx context.Context) ([]domain.CompanyID, error)
 }
 
 // Source fetches tenant data from the host system.

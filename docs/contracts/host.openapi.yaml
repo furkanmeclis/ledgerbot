@@ -35,6 +35,13 @@ paths:
       responses:
         '200': { description: Matrix, content: { application/json: { schema: { $ref: 'permissions.schema.json' } } } }
         '404': { description: Unknown company }
+  /companies:
+    get:
+      summary: List company ids (scheduled reports, simulator)
+      responses:
+        '200':
+          description: Companies
+          content: { application/json: { schema: { type: object, properties: { companies: { type: array, items: { type: string } } } } } }
   /identities:
     get:
       summary: Route a channel address to companies (central WhatsApp number / shared bot)
@@ -74,6 +81,20 @@ paths:
           content:
             application/json:
               schema: { type: object, properties: { customer_id: { type: string }, balance: { type: integer }, overdue: { type: integer }, as_of: { type: string, format: date-time } } }
+  /companies/{company}/customers/{id}/invoices/open:
+    get:
+      summary: A customer's unpaid invoices (used to match collections)
+      parameters:
+        - { name: company, in: path, required: true, schema: { type: string } }
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Open invoices, remaining amount in kuruş
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { type: object, properties: { customer_id: { type: string }, invoice_no: { type: string }, amount: { type: integer }, due_date: { type: string, format: date } } }
   /companies/{company}/receivables/overdue:
     get:
       summary: Overdue invoices
@@ -115,16 +136,18 @@ paths:
                     min_stock: { type: integer }
   /companies/{company}/summary:
     get:
-      summary: Daily summary
+      summary: Daily (`day`) or period (`from`, `to` exclusive) summary
       parameters:
         - { name: company, in: path, required: true, schema: { type: string } }
         - { name: day, in: query, schema: { type: string, format: date } }
+        - { name: from, in: query, schema: { type: string, format: date } }
+        - { name: to, in: query, schema: { type: string, format: date } }
       responses:
         '200':
           description: Summary
           content:
             application/json:
-              schema: { type: object, properties: { day: { type: string }, sales: { type: integer }, collections: { type: integer }, payments: { type: integer }, expenses: { type: integer }, orders: { type: integer } } }
+              schema: { type: object, properties: { day: { type: string }, sales: { type: integer }, collections: { type: integer }, payments: { type: integer }, expenses: { type: integer }, output_vat: { type: integer }, input_vat: { type: integer }, orders: { type: integer } } }
   /companies/{company}/records:
     post:
       summary: Commit a record (collection, payment, expense, order)
@@ -149,6 +172,10 @@ paths:
                 amount: { type: integer }
                 vat: { type: integer }
                 note: { type: string }
+                allocations:
+                  type: array
+                  description: For collections, the open invoices this payment closes (computed by ledgerbot).
+                  items: { type: object, properties: { invoice_no: { type: string }, amount: { type: integer } } }
                 lines:
                   type: array
                   items:

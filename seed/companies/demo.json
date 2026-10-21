@@ -14,6 +14,12 @@
       { "event": "invoice.overdue", "notify_roles": ["owner", "accountant"], "throttle": "24h" },
       { "event": "payment.received", "notify_roles": ["owner"] }
     ],
+    "timezone": "Europe/Istanbul",
+    "reports": [
+      { "type": "daily_digest", "at": "08:30", "roles": ["owner"] },
+      { "type": "weekly_pnl", "at": "17:30", "weekday": 5, "roles": ["owner", "accountant"] },
+      { "type": "monthly_vat", "at": "10:00", "day": 20, "roles": ["accountant"] }
+    ],
     "prompts": {
       "system": "Firma bir kırtasiye ve ofis malzemeleri toptancısıdır. Kısa ve resmi cevap ver.",
       "roles": { "sales": "Kullanıcı satış temsilcisidir, kayıt yetkisi yoktur." }
