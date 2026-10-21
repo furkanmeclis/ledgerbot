@@ -34,13 +34,18 @@ Each item ships as its own pull request with CI green.
   repeats within a week are flagged; flagged records always ask for approval and
   emit `anomaly.detected`.
 
+- **IMAP listener**: mailboxes with `imap_host` are polled over TLS by the leased
+  listener; unseen mail is marked seen only after it is queued; attachments become
+  documents (receipts, e-invoices, statements).
+- **Company switching**: users who belong to several companies on a central number
+  or bot can say "firmalar" and "firma değiştir 2"/"firma değiştir <ad>".
+- **Document indexing**: committed receipts and e-invoices are indexed with their
+  line items, so "kayıtlarda toner ara" finds the invoice.
+
 ## Next
 
-- **Document indexing**: index extracted receipts and e-invoices into RAG.
 - **Multi-step plans with the LLM**: chained commands beyond the rule parser, with a
   bounded tool loop and per-step permission checks.
-- **IMAP listener** for mailboxes (the e-mail driver already accepts inbound-parse webhooks and sends via SMTP).
-- **Company switching** for users that belong to several companies on a central number.
 
 ## Later
 

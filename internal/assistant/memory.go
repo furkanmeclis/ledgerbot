@@ -129,4 +129,19 @@ func (e *Engine) rememberRecord(ctx context.Context, d domain.Draft) {
 	if err := e.Knowledge.Remember(ctx, d.CompanyID, "record", d.ID, text); err != nil {
 		e.Log.Warn("remember record failed", "draft", d.ID, "err", err)
 	}
+	// Documents (receipts, e-invoices) are also indexed with their items, so
+	// "kayıtlarda toner ara" finds the invoice that contained toner.
+	var rec dataprovider.Record
+	if json.Unmarshal(d.Payload, &rec) != nil || rec.Kind != dataprovider.RecordExpense || len(rec.Lines) == 0 {
+		return
+	}
+	names := make([]string, 0, len(rec.Lines))
+	for _, l := range rec.Lines {
+		names = append(names, l.Name)
+	}
+	doc := fmt.Sprintf("%s belge %s, %s (VKN %s): %s. Toplam %s, KDV %s.", rec.Date.Format("02.01.2006"),
+		rec.DocumentNo, rec.Vendor, rec.VendorTax, strings.Join(names, ", "), rec.Amount, rec.VAT)
+	if err := e.Knowledge.Remember(ctx, d.CompanyID, "document", d.ID, doc); err != nil {
+		e.Log.Warn("remember document failed", "draft", d.ID, "err", err)
+	}
 }

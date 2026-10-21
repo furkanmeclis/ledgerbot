@@ -150,6 +150,10 @@ type Store interface {
 	// Cleanup removes expired blobs, idempotency keys and throttles.
 	Cleanup(ctx context.Context) (int64, error)
 
+	// Active company for multi-company users on central connections.
+	SetActiveCompany(ctx context.Context, ch domain.ChannelKind, address string, c domain.CompanyID) error
+	ActiveCompany(ctx context.Context, ch domain.ChannelKind, address string) (domain.CompanyID, error)
+
 	// ThrottleOnce returns true the first time key is seen within ttl (alert throttling).
 	ThrottleOnce(ctx context.Context, c domain.CompanyID, key string, ttl time.Duration) (bool, error)
 }

@@ -61,7 +61,7 @@ Real AI providers: copy `providers.example.json` to `providers.json`, set the AP
 | Media | Item-level receipt extraction (vision model), e-invoice line items, voice notes through pluggable STT |
 | Safety | Duplicate documents, verbatim tool output, per-company AI quota, cost tracking per purpose/provider/model |
 | Money | Integer kuruş everywhere, Turkish notation parser, daily FX to TRY (TCMB) |
-| Channels | WuzAPI (per company / central with directory routing), Meta WABA, Telegram (webhook or long polling), e-mail (inbound JSON + SMTP), dev |
+| Channels | WuzAPI (per company / central with directory routing and "firma değiştir"), Meta WABA, Telegram (webhook or long polling), e-mail (IMAP polling or inbound JSON, SMTP replies), dev |
 | Platform | REST API with OpenAPI, API keys + optional HMAC, idempotency keys, rate limits, signed outbound webhooks, audit log, KVKK/Meta data deletion, Prometheus metrics, health checks |
 | Scale | Stateless api, redundant workers, per-company fairness, leased listeners with failover, dead letters, k6 load test with 4,000 companies |
 

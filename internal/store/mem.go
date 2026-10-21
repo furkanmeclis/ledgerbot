@@ -23,13 +23,14 @@ type Mem struct {
 	idem      map[string]IdemRecord
 	throttle  map[string]time.Time
 	blobs     map[string][]byte
+	active    map[string]domain.CompanyID
 }
 
 // NewMem returns an empty Mem store.
 func NewMem() *Mem {
 	return &Mem{
 		drafts: map[string]domain.Draft{}, fps: map[string]string{},
-		deletions: map[string]DeletionRequest{}, conns: map[string]Connection{}, idem: map[string]IdemRecord{}, throttle: map[string]time.Time{}, blobs: map[string][]byte{},
+		deletions: map[string]DeletionRequest{}, conns: map[string]Connection{}, idem: map[string]IdemRecord{}, throttle: map[string]time.Time{}, blobs: map[string][]byte{}, active: map[string]domain.CompanyID{},
 	}
 }
 
@@ -364,3 +365,20 @@ func (m *Mem) DeleteBlob(_ context.Context, id string) error {
 }
 
 func (m *Mem) Cleanup(context.Context) (int64, error) { return 0, nil }
+
+func (m *Mem) SetActiveCompany(_ context.Context, ch domain.ChannelKind, addr string, c domain.CompanyID) error {
+	m.mu.Lock()
+	m.active[string(ch)+"|"+addr] = c
+	m.mu.Unlock()
+	return nil
+}
+
+func (m *Mem) ActiveCompany(_ context.Context, ch domain.ChannelKind, addr string) (domain.CompanyID, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	c, ok := m.active[string(ch)+"|"+addr]
+	if !ok {
+		return "", ErrNotFound
+	}
+	return c, nil
+}

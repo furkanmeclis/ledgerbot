@@ -136,10 +136,13 @@ func (w *inboundWorker) Work(ctx context.Context, job *river.Job[queue.InboundAr
 	defer span.End()
 	msg := job.Args.Msg
 	if msg.CompanyID == "" {
-		c, err := w.route(ctx, msg)
-		if err != nil || c == "" {
+		c, handled, err := w.routeCentral(ctx, msg)
+		if handled || err != nil {
+			return err
+		}
+		if c == "" {
 			metrics.JobsProcessed.WithLabelValues(job.Kind, "unroutable").Inc()
-			return err // nil when nobody owns the address: drop
+			return nil // nobody owns the address: drop
 		}
 		msg.CompanyID = c
 	}
@@ -189,19 +192,6 @@ func (w *inboundWorker) Work(ctx context.Context, job *river.Job[queue.InboundAr
 	}
 	metrics.JobsProcessed.WithLabelValues(job.Kind, "ok").Inc()
 	return nil
-}
-
-// route resolves the company for a message that arrived on a central connection.
-func (w *inboundWorker) route(ctx context.Context, msg domain.InboundMessage) (domain.CompanyID, error) {
-	if w.d.Directory == nil {
-		return "", nil
-	}
-	ids, err := w.d.Directory.Lookup(ctx, msg.Channel, msg.Sender)
-	if err != nil || len(ids) == 0 {
-		return "", err
-	}
-	// Multi-company users: first match until "firma değiştir" lands (follow-up).
-	return ids[0], nil
 }
 
 // --- outbound ------------------------------------------------------------------

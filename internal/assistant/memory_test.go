@@ -65,3 +65,16 @@ func TestKnowledgeDisabled(t *testing.T) {
 		t.Fatalf("disabled memory: %q", joined(r))
 	}
 }
+
+func TestDocumentIndexing(t *testing.T) {
+	h := newHarness(t, func(s *tenant.Settings, _ *tenant.Matrix) { s.SaveMode = domain.SaveAuto })
+	withKnowledge(h)
+	img := domain.Media{MIME: "image/jpeg", Data: []byte(ai.FakeReceipt)}
+	if _, err := h.e.Handle(context.Background(), domain.InboundMessage{ID: "doc", CompanyID: "demo", Channel: domain.ChannelDev, Sender: "owner", Kind: domain.KindImage, Media: &img}); err != nil {
+		t.Fatal(err)
+	}
+	r := h.send(t, "owner", "kayıtlarda toner ara")
+	if !strings.Contains(joined(r), "[belge]") || !strings.Contains(joined(r), "Toner 85A") {
+		t.Fatalf("document search: %q", joined(r))
+	}
+}
