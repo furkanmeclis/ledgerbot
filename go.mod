@@ -1,6 +1,6 @@
 module github.com/furkanmeclis/ledgerbot
 
-go 1.26.4
+go 1.26.10
 
 require (
 	github.com/emersion/go-imap v1.2.1
