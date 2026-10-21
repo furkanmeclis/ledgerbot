@@ -99,20 +99,22 @@ func must(err error) {
 // ---- derived numbers ------------------------------------------------------------
 
 type capacity struct {
-	Profile        string  `json:"profile"`
-	BudgetGB       float64 `json:"budget_gb"`
-	SustainedRPS   float64 `json:"sustained_rps"`
-	SustainedVUs   int     `json:"sustained_vus"`
-	SaturationVUs  int     `json:"saturation_vus"`
-	PeakRPS        float64 `json:"peak_rps"`
-	BestSyncP95Ms  float64 `json:"best_sync_p95_ms"`
-	WorstErrRate   float64 `json:"worst_error_rate"`
-	OOMKills       int     `json:"oom_kills"`
-	Restarts       int     `json:"restarts"`
-	UndrainedSteps int     `json:"undrained_steps"`
-	InboundWaitP95 float64 `json:"inbound_wait_p95_ms_at_sustained"`
-	InboundE2EP95  float64 `json:"inbound_e2e_p95_ms_at_sustained"`
-	Error          string  `json:"error,omitempty"`
+	Profile        string   `json:"profile"`
+	BudgetGB       float64  `json:"budget_gb"`
+	SustainedRPS   float64  `json:"sustained_rps"`
+	SustainedVUs   int      `json:"sustained_vus"`
+	SaturationVUs  int      `json:"saturation_vus"`
+	MaxSLOVUs      int      `json:"max_vus_within_slo"`
+	AtLimit        []string `json:"services_at_memory_limit,omitempty"`
+	PeakRPS        float64  `json:"peak_rps"`
+	BestSyncP95Ms  float64  `json:"best_sync_p95_ms"`
+	WorstErrRate   float64  `json:"worst_error_rate"`
+	OOMKills       int      `json:"oom_kills"`
+	Restarts       int      `json:"restarts"`
+	UndrainedSteps int      `json:"undrained_steps"`
+	InboundWaitP95 float64  `json:"inbound_wait_p95_ms_at_sustained"`
+	InboundE2EP95  float64  `json:"inbound_e2e_p95_ms_at_sustained"`
+	Error          string   `json:"error,omitempty"`
 	capped         bool
 }
 
@@ -140,6 +142,9 @@ func capacityOf(p *profile) capacity {
 				c.InboundWaitP95, c.InboundE2EP95 = q.WaitMs[1], q.E2EMs[1]
 			}
 		}
+		if ok && s.VUs > c.MaxSLOVUs {
+			c.MaxSLOVUs = s.VUs
+		}
 		if !ok && c.SaturationVUs == 0 {
 			c.SaturationVUs = s.VUs
 		}
@@ -151,6 +156,11 @@ func capacityOf(p *profile) capacity {
 		c.Restarts += ct.Restarts
 	}
 	c.OOMKills = max(c.OOMKills, p.OOMEvents)
+	for _, svc := range []string{"postgres", "api", "worker", "gateway"} {
+		if pk := p.Peaks[svc]; pk != nil && pk.LimitMB > 0 && pk.MemMB >= pk.LimitMB*0.97 && !c.capped {
+			c.AtLimit = append(c.AtLimit, svc)
+		}
+	}
 	return c
 }
 
@@ -241,6 +251,12 @@ func findings(r *report, s summary) []string {
 		}
 		if c.OOMKills > 0 {
 			f = append(f, fmt.Sprintf("Profile %s: the kernel OOM killer fired %d time(s) inside the memory limit (restarts: %d); worst error rate %.1f%%.", c.Profile, c.OOMKills, c.Restarts, c.WorstErrRate*100))
+		}
+		if len(c.AtLimit) > 0 {
+			f = append(f, fmt.Sprintf("Profile %s: %s reached its memory limit during the run.", c.Profile, strings.Join(c.AtLimit, ", ")))
+		}
+		if c.SaturationVUs > 0 && c.MaxSLOVUs > 0 {
+			f = append(f, fmt.Sprintf("Profile %s keeps the service level up to %d parallel clients and breaks it at %d.", c.Profile, c.MaxSLOVUs, c.SaturationVUs))
 		}
 		if c.UndrainedSteps > 0 {
 			f = append(f, fmt.Sprintf("Profile %s: the queue did not drain within the timeout after %d step(s).", c.Profile, c.UndrainedSteps))
@@ -564,14 +580,14 @@ func renderPerf(b *strings.Builder, r *report, sum summary) {
 		peak.Values = append(peak.Values, c.PeakRPS)
 	}
 	w(`<div class="card"><h4>Capacity per RAM profile</h4><p class="sub">Sustained = highest throughput where sync p95 &lt; %.0f ms and errors &lt; %.0f%%.</p>%s</div>`, capP95Ms, capErrRate*100, barChart(cats, []series{sus, peak}, "requests / s", 0))
-	w(`<table><thead><tr><th>Profile</th><th class="n">Sustained req/s</th><th class="n">at VUs</th><th class="n">Saturates at VUs</th><th class="n">Peak req/s</th><th class="n">Best sync p95</th><th class="n">Worst errors</th><th class="n">Queue wait p95</th><th class="n">Queue end-to-end p95</th><th class="n">OOM kills</th><th class="n">Restarts</th></tr></thead><tbody>`)
+	w(`<table><thead><tr><th>Profile</th><th class="n">Sustained req/s</th><th class="n">at VUs</th><th class="n">Max VUs within SLO</th><th class="n">Saturates at VUs</th><th class="n">Peak req/s</th><th class="n">Best sync p95</th><th class="n">Worst errors</th><th class="n">Queue wait p95</th><th class="n">Queue end-to-end p95</th><th class="n">OOM kills</th><th class="n">Restarts</th></tr></thead><tbody>`)
 	for _, c := range sum.Capacity {
 		sat := "–"
 		if c.SaturationVUs > 0 {
 			sat = fmt.Sprint(c.SaturationVUs)
 		}
-		w(`<tr><td>%s</td><td class="n">%s</td><td class="n">%d</td><td class="n">%s</td><td class="n">%s</td><td class="n">%s ms</td><td class="n %s">%.2f%%</td><td class="n">%s ms</td><td class="n">%s ms</td><td class="n %s">%d</td><td class="n">%d</td></tr>`,
-			esc(c.Profile), fmtNum(c.SustainedRPS), c.SustainedVUs, sat, fmtNum(c.PeakRPS), fmtNum(c.BestSyncP95Ms), cls(c.WorstErrRate >= capErrRate, "badtext"), c.WorstErrRate*100,
+		w(`<tr><td>%s</td><td class="n">%s</td><td class="n">%d</td><td class="n">%d</td><td class="n">%s</td><td class="n">%s</td><td class="n">%s ms</td><td class="n %s">%.2f%%</td><td class="n">%s ms</td><td class="n">%s ms</td><td class="n %s">%d</td><td class="n">%d</td></tr>`,
+			esc(c.Profile), fmtNum(c.SustainedRPS), c.SustainedVUs, c.MaxSLOVUs, sat, fmtNum(c.PeakRPS), fmtNum(c.BestSyncP95Ms), cls(c.WorstErrRate >= capErrRate, "badtext"), c.WorstErrRate*100,
 			fmtNum(c.InboundWaitP95), fmtNum(c.InboundE2EP95), cls(c.OOMKills > 0, "badtext"), c.OOMKills, c.Restarts)
 	}
 	w(`</tbody></table>`)
@@ -666,7 +682,7 @@ func renderMethod(b *strings.Builder, r *report) {
 	}
 	fmt.Fprintf(b, `<section><h2>Method</h2><ul class="small">
 <li>Functional suites: <code>go test -race -json</code> over <code>./internal/...</code> (unit), <code>./tests/integration</code> (PostgreSQL 17 + pgvector), <code>./tests/feature</code> and <code>./tests/simulation</code>. Coverage is the statement coverage of the unit and integration runs.</li>
-<li>Load: <code>scripts/perf/run-profiles.sh</code> starts <code>loadtest/perf/compose.yml</code> with a total memory budget split 35%% PostgreSQL, 2 × 10%% api, 3 × 13%% worker, plus a 96 MB gateway. Go processes get <code>GOMEMLIMIT</code> at 85%% of their container limit; PostgreSQL gets shared_buffers at 25%% of its limit. Profiles with a <code>-tuned</code> suffix use fewer database connections per process and lower worker concurrency.</li>
+<li>Load: <code>scripts/perf/run-profiles.sh</code> starts <code>loadtest/perf/compose.yml</code> with a total memory budget split 35%% PostgreSQL, 2 × 10%% api, 3 × 12%% worker and 6%% (at least 160 MB) for the gateway. Go processes get <code>GOMEMLIMIT</code> at 85%% of their container limit; PostgreSQL gets shared_buffers at 25%% of its limit. Profiles with a <code>-tuned</code> suffix use fewer database connections per process and lower worker concurrency.</li>
 <li>Each profile runs k6 steps of %s virtual users, %s each, against 4,000 generated companies (random company per request), all AI providers offline (fake), fake data provider, static FX rates.</li>
 <li>Queue times come from River's job table: wait = attempted − created, run = finalized − attempted, end-to-end = finalized − created, for jobs created during the step. Memory and CPU come from <code>docker stats</code> sampled about every two seconds; OOM kills from <code>docker inspect</code> and <code>docker events</code>.</li>
 <li>The load generator runs on the same host as the stack, so CPU is shared; absolute numbers are a floor for a dedicated server, the comparison between profiles is the point.</li>
@@ -682,9 +698,9 @@ func markdown(r *report, s summary) string {
 		fmt.Fprintf(&b, "| %s | %d | %d | %d |\n", st.Name, st.Pass, st.Fail, st.Skip)
 	}
 	if len(s.Capacity) > 0 {
-		b.WriteString("\n| RAM profile | Sustained req/s | at VUs | Peak req/s | Best sync p95 | Worst errors | OOM kills |\n|---|---|---|---|---|---|---|\n")
+		b.WriteString("\n| RAM profile | Sustained req/s | at VUs | Max VUs within SLO | Peak req/s | Best sync p95 | Worst errors | OOM kills |\n|---|---|---|---|---|---|---|---|\n")
 		for _, c := range s.Capacity {
-			fmt.Fprintf(&b, "| %s | %s | %d | %s | %s ms | %.2f%% | %d |\n", c.Profile, fmtNum(c.SustainedRPS), c.SustainedVUs, fmtNum(c.PeakRPS), fmtNum(c.BestSyncP95Ms), c.WorstErrRate*100, c.OOMKills)
+			fmt.Fprintf(&b, "| %s | %s | %d | %d | %s | %s ms | %.2f%% | %d |\n", c.Profile, fmtNum(c.SustainedRPS), c.SustainedVUs, c.MaxSLOVUs, fmtNum(c.PeakRPS), fmtNum(c.BestSyncP95Ms), c.WorstErrRate*100, c.OOMKills)
 		}
 	}
 	if len(s.Findings) > 0 {

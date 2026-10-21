@@ -74,19 +74,20 @@ for token in $PROFILES; do
   fi
   rm -rf "$dir"; mkdir -p "$dir"
   mb=$((gb * 1024))
-  pg=$((mb * 35 / 100)); api=$((mb * 10 / 100)); wk=$((mb * 13 / 100))
-  export PERF_PG_MEM="${pg}m" PERF_API_MEM="${api}m" PERF_WORKER_MEM="${wk}m" PERF_GATEWAY_MEM=96m
+  pg=$((mb * 35 / 100)); api=$((mb * 10 / 100)); wk=$((mb * 12 / 100)); gw=$((mb * 6 / 100))
+  [ "$gw" -lt 160 ] && gw=160
+  export PERF_PG_MEM="${pg}m" PERF_API_MEM="${api}m" PERF_WORKER_MEM="${wk}m" PERF_GATEWAY_MEM="${gw}m"
   export PERF_PG_SHARED_BUFFERS="$((pg / 4))MB" PERF_PG_CACHE="$((pg / 2))MB" PERF_PG_MAX_CONNS=250
   export PERF_API_GOMEMLIMIT="$((api * 85 / 100))MiB" PERF_WORKER_GOMEMLIMIT="$((wk * 85 / 100))MiB"
   export PERF_API_REPLICAS=${PERF_API_REPLICAS:-2} PERF_WORKER_REPLICAS=${PERF_WORKER_REPLICAS:-3}
   capped=false; [ "$host_mem" -gt 0 ] && [ $((mb * 1024 * 1024)) -gt "$host_mem" ] && capped=true
   cat >"$dir/profile.json" <<EOF
 {"gb":$gb,"tuned":$tuned,"name":"$(basename "$dir")","budget_mb":$mb,"db_max_conns":$PERF_DB_MAX_CONNS,"worker_concurrency":$PERF_WORKER_CONCURRENCY,"postgres_mb":$pg,"api_mb":$api,"api_replicas":$PERF_API_REPLICAS,
- "worker_mb":$wk,"worker_replicas":$PERF_WORKER_REPLICAS,"gateway_mb":96,
+ "worker_mb":$wk,"worker_replicas":$PERF_WORKER_REPLICAS,"gateway_mb":$gw,
  "pg_shared_buffers":"$PERF_PG_SHARED_BUFFERS","api_gomemlimit":"$PERF_API_GOMEMLIMIT",
  "worker_gomemlimit":"$PERF_WORKER_GOMEMLIMIT","capped_by_host":$capped}
 EOF
-  log "profile $(basename "$dir"): postgres ${pg}m, api ${PERF_API_REPLICAS}x${api}m, worker ${PERF_WORKER_REPLICAS}x${wk}m"
+  log "profile $(basename "$dir"): postgres ${pg}m, api ${PERF_API_REPLICAS}x${api}m, worker ${PERF_WORKER_REPLICAS}x${wk}m, gateway ${gw}m"
   "${COMPOSE[@]}" down -v --remove-orphans >/dev/null 2>&1
   if ! "${COMPOSE[@]}" up -d >"$dir/up.log" 2>&1; then log "compose up failed"; fi
   if ! docker run --rm --network "$NET" -v "$ROOT/loadtest/perf:/scripts:ro" "$K6_IMAGE" run -q /scripts/ready.js >"$dir/ready.log" 2>&1; then

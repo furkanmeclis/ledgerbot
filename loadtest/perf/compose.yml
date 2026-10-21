@@ -91,7 +91,8 @@ services:
   gateway:
     image: caddy:2.10-alpine
     command: ["caddy", "reverse-proxy", "--from", ":8080", "--to", "api:8080"]
-    mem_limit: ${PERF_GATEWAY_MEM:-96m}
+    mem_limit: ${PERF_GATEWAY_MEM:-160m}
+    memswap_limit: ${PERF_GATEWAY_MEM:-160m}
     depends_on:
       - api
     restart: unless-stopped
