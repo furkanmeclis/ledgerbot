@@ -26,5 +26,11 @@ echo "== idempotency"
 a=$(curl -fsS -X POST "$BASE/v1/messages/send" "${H[@]}" -H 'Idempotency-Key: smoke-1' -d '{"channel":"dev","to":"owner","text":"hi"}')
 b=$(curl -fsS -X POST "$BASE/v1/messages/send" "${H[@]}" -H 'Idempotency-Key: smoke-1' -d '{"channel":"dev","to":"owner","text":"hi"}')
 [ "$a" = "$b" ] || { echo "FAIL: idempotent replay differs"; exit 1; }
+echo "== memory";       post /v1/dev/messages '{"sender":"owner","text":"not al: depo kirası her ayın 5inde Demir Yapıya ödenir"}' >/dev/null
+for i in $(seq 1 30); do
+  out=$(post /v1/dev/messages '{"sender":"owner","text":"notlarda depo kirası ara"}')
+  grep -q 'Demir' <<<"$out" && break; sleep 1
+done
+expect 'Demir' "$out"
 echo "== usage";        out=$(curl -fsS "$BASE/v1/usage" "${H[@]}"); expect total_calls "$out"
 echo "OK"

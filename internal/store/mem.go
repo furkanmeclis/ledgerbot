@@ -93,6 +93,21 @@ func (m *Mem) ListDrafts(_ context.Context, c domain.CompanyID, f DraftFilter) (
 	return out, nil
 }
 
+func (m *Mem) LastCommitted(_ context.Context, c domain.CompanyID, actor domain.UserID, caps []string) (domain.Draft, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var best domain.Draft
+	for _, d := range m.drafts {
+		if d.CompanyID == c && d.ActorID == actor && d.Status == domain.DraftCommitted && slices.Contains(caps, d.Capability) && d.CreatedAt.After(best.CreatedAt) {
+			best = d
+		}
+	}
+	if best.ID == "" {
+		return best, ErrNotFound
+	}
+	return best, nil
+}
+
 func (m *Mem) LatestPending(_ context.Context, c domain.CompanyID, ch domain.ChannelKind, sender string, maxAge time.Duration) (domain.Draft, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

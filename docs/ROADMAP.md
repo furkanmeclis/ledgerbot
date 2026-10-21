@@ -2,11 +2,17 @@
 
 Each item ships as its own pull request with CI green.
 
+## Done
+
+- **Memory and RAG**: "her zamanki gibi [tutar]" repeats the user's latest record;
+  "not al: ..." stores company notes; "notlarda X ara" / "X hakkında ne biliyorsun"
+  searches notes and committed records. Per-company pgvector chunks, HNSW expression
+  index per embedding dimension, embeddings computed by workers off the hot path,
+  answers returned verbatim (no generated text).
+
 ## Next
 
-- **Memory and RAG**: per-company embeddings in `rag_chunks` (pgvector, HNSW per
-  embedding dimension), indexed from documents, committed records and company notes.
-  "Her zamanki gibi" suggests the usual supplier and category.
+- **Document indexing**: index extracted receipts and e-invoices into RAG.
 - **Multi-step plans with the LLM**: chained commands beyond the rule parser, with a
   bounded tool loop and per-step permission checks.
 - **Payment ↔ invoice matching**: match incoming payments to open invoices.

@@ -26,6 +26,7 @@ import (
 	"github.com/furkanmeclis/ledgerbot/internal/domain"
 	"github.com/furkanmeclis/ledgerbot/internal/metrics"
 	"github.com/furkanmeclis/ledgerbot/internal/queue"
+	"github.com/furkanmeclis/ledgerbot/internal/rag"
 	"github.com/furkanmeclis/ledgerbot/internal/secretbox"
 	"github.com/furkanmeclis/ledgerbot/internal/store"
 	"github.com/furkanmeclis/ledgerbot/internal/tenant"
@@ -45,6 +46,8 @@ type Deps struct {
 	Log       *slog.Logger
 	// PerCompanyInflight caps concurrent jobs per company in this process.
 	PerCompanyInflight int
+	// Knowledge is the RAG index (nil disables indexing jobs).
+	Knowledge rag.Index
 	// SimCompanies lists companies the simulator drives.
 	SimCompanies func() ([]domain.CompanyID, error)
 }
@@ -59,6 +62,7 @@ func Register(ws *river.Workers, d *Deps) {
 	river.AddWorker(ws, &deletionWorker{d: d})
 	river.AddWorker(ws, &simulateWorker{d: d})
 	river.AddWorker(ws, &cleanupWorker{d: d})
+	river.AddWorker(ws, &ragWorker{d: d})
 }
 
 // PeriodicJobs returns the scheduled jobs (run once cluster-wide by the leader).
@@ -270,4 +274,19 @@ func Decrypt(box *secretbox.Box, c store.Connection) (channels.Conn, error) {
 		cfg = []byte("{}")
 	}
 	return channels.Conn{Connection: c, Config: json.RawMessage(cfg)}, nil
+}
+
+// --- rag indexing ----------------------------------------------------------------
+
+type ragWorker struct {
+	river.WorkerDefaults[queue.RAGIndexArgs]
+	d *Deps
+}
+
+func (w *ragWorker) Work(ctx context.Context, job *river.Job[queue.RAGIndexArgs]) error {
+	if w.d.Knowledge == nil {
+		return nil
+	}
+	a := job.Args
+	return w.d.Knowledge.Add(ctx, a.CompanyID, a.Source, a.Ref, a.Text)
 }

@@ -26,6 +26,11 @@ func TestParseRules(t *testing.T) {
 		{"Ahmet Yılmaz için 10 paket A4 kağıdı sipariş oluştur", []string{"create_order"}, map[string]string{"customer": "Ahmet Yılmaz", "quantity": "10", "product": "A4 kağıdı"}},
 		{"Ahmet'e ekstre at ve vadesi geçenleri hatırlat", []string{"send_statement", "query_overdue"}, map[string]string{"customer": "Ahmet"}},
 		{"yardım", []string{"help"}, nil},
+		{"her zamanki gibi", []string{"repeat_last"}, nil},
+		{"her zamanki gibi 750 TL", []string{"repeat_last"}, map[string]string{"amount": "750", "currency": "TL"}},
+		{"not al: Ahmet'ten 5000 TL tahsilat geldiğinde makbuz kes", []string{"add_note"}, map[string]string{"text": "Ahmet'ten 5000 TL tahsilat geldiğinde makbuz kes"}},
+		{"notlarda kira ara", []string{"search_knowledge"}, map[string]string{"query": "kira"}},
+		{"Mehmet Kaya hakkında ne biliyorsun", []string{"search_knowledge"}, map[string]string{"query": "Mehmet Kaya"}},
 	}
 	for _, c := range cases {
 		got := ParseRules(c.in)
