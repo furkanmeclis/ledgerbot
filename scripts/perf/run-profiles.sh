@@ -116,8 +116,11 @@ EOF
       sleep 1
     done
     drain=$(( $(date +%s) - t0 ))
-    psql_q "SELECT json_build_object('start','$start','stop','$stop','drain_s',$drain,'drained',$drained,'queues',
-      coalesce(json_agg(q),'[]'::json)) FROM (
+    psql_q "SELECT json_build_object('start','$start','stop','$stop','drain_s',$drain,'drained',$drained,
+      'left',(SELECT coalesce(json_agg(l),'[]'::json) FROM (SELECT queue, kind, state::text, count(*) AS n,
+        min(scheduled_at) AS next_at, max(attempt) AS max_attempt FROM river_job
+        WHERE created_at >= '$start' AND state NOT IN ('completed','discarded','cancelled') GROUP BY 1,2,3) l),
+      'queues', coalesce(json_agg(q),'[]'::json)) FROM (
         SELECT queue, count(*) AS jobs,
           count(*) FILTER (WHERE state='completed') AS completed,
           count(*) FILTER (WHERE state IN ('discarded','cancelled')) AS failed,
