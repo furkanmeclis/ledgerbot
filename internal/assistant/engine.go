@@ -122,6 +122,11 @@ func (e *Engine) Handle(ctx context.Context, msg domain.InboundMessage) (Reply, 
 		if m := msg.Media; m != nil && !strings.HasPrefix(m.MIME, "image/") && bank.Looks(m.MIME, m.Filename, msg.Text) {
 			capName = "import_bank_statement"
 		}
+		args := map[string]string{}
+		if msg.Media != nil {
+			args["mime"] = msg.Media.MIME
+		}
+		reply.Intents = []nlu.Intent{{Capability: capName, Source: "document", Args: args}}
 		e.runCapability(ctx, call, capName, &reply)
 		return reply, nil
 	}

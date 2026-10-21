@@ -67,6 +67,16 @@ Real AI providers: copy `providers.example.json` to `providers.json`, set the AP
 
 See [docs/ROADMAP.md](docs/ROADMAP.md) for what comes next.
 
+## Demo console
+
+`dashboard/` is a separate demo-only web console (own image and compose) for
+presenting ledgerbot without a live accounting system: channel views with live
+replies, approvals, audit log, AI usage and all settings, with a DEMO watermark.
+
+```bash
+cd dashboard && docker compose up -d --build   # http://localhost:3000
+```
+
 ## Contracts
 
 | Contract | File |

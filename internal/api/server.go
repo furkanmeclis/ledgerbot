@@ -91,6 +91,7 @@ func (s *Server) Handler() http.Handler {
 	r.Route("/v1", func(r chi.Router) {
 		r.Use(s.auth, s.rateLimit, s.idempotency)
 		r.Get("/capabilities", s.capabilities)
+		r.With(scope("settings")).Get("/settings", s.settings)
 		r.With(scope("messages")).Post("/messages", s.analyze)
 		r.With(scope("messages")).Post("/messages/send", s.send)
 		r.With(scope("drafts")).Get("/drafts", s.listDrafts)

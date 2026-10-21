@@ -1,0 +1,26 @@
+# ledgerbot demo console: a separate stack that attaches to a running ledgerbot.
+#
+#   (in the repo root)  docker compose up -d          # ledgerbot: postgres, api, workers, gateway
+#   (here)              docker compose up -d --build  # console on http://localhost:3000
+#
+# The console talks to ledgerbot's REST API with the demo keys (never exposed
+# to the browser) and listens to PostgreSQL notifications for live replies.
+name: ledgerbot-demo
+
+services:
+  dashboard:
+    build: .
+    image: ledgerbot-dashboard:local
+    environment:
+      LEDGERBOT_URL: http://gateway:8080
+      DATABASE_URL: postgres://ledgerbot:ledgerbot@postgres:5432/ledgerbot
+      DEMO_COMPANIES: demo:lb_demo_demosecret0000000000000000,demo2:lb_demo2_demosecret0000000000000000
+    ports:
+      - "${DASHBOARD_PORT:-3000}:3000"
+    networks: [ledgerbot]
+    restart: unless-stopped
+
+networks:
+  ledgerbot:
+    name: ledgerbot_default
+    external: true

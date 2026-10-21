@@ -363,8 +363,8 @@ func (p *PG) AppendDev(ctx context.Context, out domain.OutboundMessage) error {
 
 // ListDev returns the latest dev replies for a recipient, oldest first.
 func (p *PG) ListDev(ctx context.Context, c domain.CompanyID, to string, limit int) ([]domain.OutboundMessage, error) {
-	rows, err := p.DB.Query(ctx, `SELECT text FROM (
-			SELECT id, text FROM dev_outbox WHERE company_id = $1 AND recipient = $2 ORDER BY id DESC LIMIT $3
+	rows, err := p.DB.Query(ctx, `SELECT id, text, at FROM (
+			SELECT id, text, at FROM dev_outbox WHERE company_id = $1 AND recipient = $2 ORDER BY id DESC LIMIT $3
 		) t ORDER BY id`, string(c), to, max(limit, 1))
 	if err != nil {
 		return nil, err
@@ -373,7 +373,7 @@ func (p *PG) ListDev(ctx context.Context, c domain.CompanyID, to string, limit i
 	var out []domain.OutboundMessage
 	for rows.Next() {
 		m := domain.OutboundMessage{CompanyID: c, Channel: domain.ChannelDev, To: to}
-		if err := rows.Scan(&m.Text); err != nil {
+		if err := rows.Scan(&m.ID, &m.Text, &m.At); err != nil {
 			return nil, err
 		}
 		out = append(out, m)

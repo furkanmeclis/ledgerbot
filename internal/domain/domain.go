@@ -81,6 +81,8 @@ type InboundMessage struct {
 
 // OutboundMessage is what the assistant sends back over a channel.
 type OutboundMessage struct {
+	ID        int64       `json:"id,omitempty"` // set when read back from an outbox
+	At        time.Time   `json:"at,omitzero"`
 	CompanyID CompanyID   `json:"company_id"`
 	Channel   ChannelKind `json:"channel"`
 	ChannelID string      `json:"channel_id,omitempty"`

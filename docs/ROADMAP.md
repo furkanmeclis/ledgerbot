@@ -42,6 +42,11 @@ Each item ships as its own pull request with CI green.
 - **Document indexing**: committed receipts and e-invoices are indexed with their
   line items, so "kayıtlarda toner ara" finds the invoice.
 
+- **Demo console** (`dashboard/`, separate image and compose): Node.js + Socket.IO,
+  React + Tailwind + shadcn-style UI, one view per channel, approvals, live audit,
+  AI usage and every settings parameter; English UI with a DEMO watermark; runs on
+  the fake data provider and simulator.
+
 ## Next
 
 - **Multi-step plans with the LLM**: chained commands beyond the rule parser, with a
@@ -50,6 +55,3 @@ Each item ships as its own pull request with CI green.
 ## Later
 
 - MCP server exposing the same capabilities.
-- Demo dashboard (separate compose and image): Node.js + Socket.IO realtime, shadcn UI,
-  one view per channel, every settings parameter visible, English UI, "Demo" watermark,
-  running on the fake data driver and simulator.
