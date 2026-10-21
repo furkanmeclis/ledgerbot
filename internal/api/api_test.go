@@ -201,3 +201,15 @@ func TestParseKey(t *testing.T) {
 		}
 	}
 }
+
+func TestSettingsRedacted(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+	code, body := call(t, srv, http.MethodGet, "/v1/settings", "", nil)
+	if code != 200 {
+		t.Fatalf("settings: %d %v", code, body)
+	}
+	raw, _ := json.Marshal(body)
+	if strings.Contains(string(raw), "59c7b9a3c6f7d1838ff3cb12d947dd5b75a2705ad9374149e2d918bb37eda2ed") || !strings.Contains(string(raw), "permissions") {
+		t.Fatalf("api key hash must be redacted: %s", raw)
+	}
+}

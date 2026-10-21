@@ -1,0 +1,75 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --radius: 0.5rem;
+  --background: oklch(0.985 0 0);
+  --foreground: oklch(0.141 0.005 285.823);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.141 0.005 285.823);
+  --primary: oklch(0.5234 0.1347 144.1672);
+  --primary-foreground: oklch(1 0 0);
+  --secondary: oklch(0.967 0.001 286.375);
+  --secondary-foreground: oklch(0.21 0.006 285.885);
+  --muted: oklch(0.967 0.001 286.375);
+  --muted-foreground: oklch(0.552 0.016 285.938);
+  --accent: oklch(0.95 0.03 145);
+  --accent-foreground: oklch(0.3 0.08 145);
+  --destructive: oklch(0.577 0.245 27.325);
+  --warning: oklch(0.75 0.15 75);
+  --border: oklch(0.92 0.004 286.32);
+  --ring: oklch(0.723 0.219 149.579);
+  --sidebar: oklch(0.21 0.02 160);
+  --sidebar-foreground: oklch(0.96 0.01 150);
+  --sidebar-muted: oklch(0.7 0.03 150);
+  --sidebar-active: oklch(0.32 0.06 150);
+}
+
+@theme inline {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-warning: var(--warning);
+  --color-border: var(--border);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-muted: var(--sidebar-muted);
+  --color-sidebar-active: var(--sidebar-active);
+}
+
+@layer base {
+  * { @apply border-border; }
+  body { @apply bg-background text-foreground font-sans antialiased; }
+}
+
+/* Demo watermark: always visible, never blocks clicks. */
+.demo-watermark {
+  position: fixed; inset: 0; pointer-events: none; z-index: 60; overflow: hidden;
+  background-image: repeating-linear-gradient(-30deg, transparent 0 220px, transparent 220px 440px);
+}
+.demo-watermark::before {
+  content: "DEMO · DEMO · DEMO · DEMO · DEMO · DEMO · DEMO · DEMO · DEMO · DEMO · DEMO · DEMO";
+  position: absolute; top: 50%; left: 50%; width: 220vmax; text-align: center;
+  transform: translate(-50%, -50%) rotate(-24deg);
+  font-size: 7vmin; font-weight: 800; letter-spacing: 0.4em; white-space: nowrap;
+  color: oklch(0.5 0.13 144 / 0.07);
+}
+
+.chat-wa { background: oklch(0.94 0.02 90); background-image: radial-gradient(oklch(0.9 0.02 90) 1px, transparent 1px); background-size: 18px 18px; }
+.chat-tg { background: linear-gradient(160deg, oklch(0.9 0.05 200), oklch(0.85 0.07 160)); }

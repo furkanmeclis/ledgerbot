@@ -7,3 +7,5 @@ providers.json
 coverage.*
 .DS_Store
 /loadtest/seed/
+/dashboard/node_modules/
+/dashboard/dist/

@@ -130,6 +130,11 @@ paths:
                       save_mode: { type: string }
                       degraded: { type: boolean }
 
+  /v1/settings:
+    get:
+      summary: Current settings and permission matrix as ledgerbot sees them (secrets redacted)
+      responses: { '200': { description: OK } }
+
   /v1/messages:
     post:
       summary: Analyze a message on behalf of a user

@@ -19,6 +19,7 @@ import (
 	"github.com/furkanmeclis/ledgerbot/internal/events"
 	"github.com/furkanmeclis/ledgerbot/internal/queue"
 	"github.com/furkanmeclis/ledgerbot/internal/store"
+	"github.com/furkanmeclis/ledgerbot/internal/tenant"
 	"github.com/furkanmeclis/ledgerbot/internal/worker"
 )
 
@@ -69,6 +70,36 @@ func (s *Server) capabilities(w http.ResponseWriter, r *http.Request) {
 		out = append(out, co)
 	}
 	ok(w, http.StatusOK, map[string]any{"capabilities": out, "save_mode": snap.Settings.SaveMode, "degraded": snap.Degraded})
+}
+
+// settings returns the company's current settings and permission matrix as
+// ledgerbot sees them, with secrets redacted (for operators and the demo dashboard).
+func (s *Server) settings(w http.ResponseWriter, r *http.Request) {
+	snap := snapFrom(r)
+	st := snap.Settings
+	st.SigningKey = redact(st.SigningKey)
+	st.APIKeys = append([]tenant.APIKey(nil), st.APIKeys...)
+	for i := range st.APIKeys {
+		st.APIKeys[i].SHA256 = redact(st.APIKeys[i].SHA256)
+	}
+	st.Webhooks = append([]tenant.Webhook(nil), st.Webhooks...)
+	for i := range st.Webhooks {
+		st.Webhooks[i].Secret = redact(st.Webhooks[i].Secret)
+	}
+	st.Plugins = append([]tenant.Plugin(nil), st.Plugins...)
+	for i := range st.Plugins {
+		st.Plugins[i].Secret = redact(st.Plugins[i].Secret)
+	}
+	ok(w, http.StatusOK, map[string]any{
+		"settings": st, "permissions": snap.Matrix, "degraded": snap.Degraded, "fetched_at": snap.FetchedAt,
+	})
+}
+
+func redact(s string) string {
+	if s == "" {
+		return ""
+	}
+	return "••••" + s[max(len(s)-4, 0):]
 }
 
 // --- messages ---------------------------------------------------------------------
