@@ -1,6 +1,6 @@
 module github.com/furkanmeclis/ledgerbot
 
-go 1.26.4
+go 1.26.10
 
 require (
 	github.com/furkanmeclis/go-ubltr v0.0.0-20260816110918-5b412e96178d
