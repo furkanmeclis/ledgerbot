@@ -1,5 +1,7 @@
 # syntax=docker/dockerfile:1.7
-FROM golang:1.26-alpine AS build
+# Pinned to go.mod's version: a host with an older cached 1.26 image would
+# otherwise fail with "go.mod requires go >= …".
+FROM golang:1.26.10-alpine AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod go mod download
