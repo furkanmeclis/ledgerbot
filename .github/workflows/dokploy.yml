@@ -47,6 +47,8 @@ jobs:
           curl -fsS http://$(ip dashboard):3000/api/companies
           curl -fsS http://$(ip docs):3000/api/health
           curl -fsS http://$(ip grafana):3000/api/health
+          # The Ledgerbot dashboard is provisioned.
+          curl -fsS -u admin:ci-grafana http://$(ip grafana):3000/api/dashboards/uid/ledgerbot-overview | jq -e '.meta.folderTitle == "Ledgerbot"'
           curl -fsS -H 'Authorization: ci-wuzapi' http://$(ip wuzapi):8080/admin/users >/dev/null
           # Prometheus sees both api replicas and all three workers.
           for i in $(seq 1 30); do
