@@ -1,0 +1,74 @@
+---
+title: Local quickstart
+description: Run Ledgerbot with fake data and offline AI, and talk to it in two requests.
+icon: Rocket
+---
+
+This runs the complete stack on one machine with the **fake** data provider and offline AI
+providers. No Easytrade instance is needed.
+
+<Steps>
+<Step>
+
+### Start the stack
+
+```bash
+git clone https://github.com/furkanmeclis/ledgerbot && cd ledgerbot
+cp .env.example .env
+docker compose up -d --build   # postgres, migrate, 2× api, 3× worker, gateway on :8080
+./scripts/smoke.sh             # end-to-end check against the demo company
+```
+
+</Step>
+<Step>
+
+### Send a message as the demo accountant
+
+The demo company (`seed/companies/demo.json`) has an API key and four users. The `dev` channel
+lets you speak as any of them:
+
+```bash
+KEY=lb_demo_demosecret0000000000000000
+curl -s localhost:8080/v1/dev/messages -H "Authorization: Bearer $KEY" \
+  -d '{"sender":"accountant","text":"Ahmet Yılmaz'\''dan 5.000 TL tahsilat"}'
+```
+
+The accountant role uses `ask_approval`, so the reply asks for confirmation and a `pending` draft
+is created.
+
+</Step>
+<Step>
+
+### Approve it
+
+```bash
+curl -s localhost:8080/v1/dev/messages -H "Authorization: Bearer $KEY" \
+  -d '{"sender":"accountant","text":"evet"}'
+```
+
+The draft is committed to the fake ledger. `GET /v1/drafts?status=committed` shows it.
+
+</Step>
+<Step>
+
+### Do the same through the REST API
+
+The `/v1/messages` endpoint runs the assistant as a user from the permission matrix — this is how
+Easytrade would call it from its own UI:
+
+```bash
+curl -s localhost:8080/v1/messages -H "Authorization: Bearer $KEY" \
+  -d '{"actor_id":"u-acc","text":"Ahmet Yılmaz bakiyesi"}'
+```
+
+</Step>
+</Steps>
+
+## Demo console
+
+`dashboard/` contains a separate demo web console (own image and compose file) with one view per
+channel, approvals, the audit log and every setting:
+
+```bash
+cd dashboard && docker compose up -d --build   # http://localhost:3000
+```

@@ -1,0 +1,18 @@
+{
+  "title": "Ledgerbot",
+  "pages": [
+    "index",
+    "---Getting started---",
+    "...getting-started",
+    "---Easytrade integration---",
+    "...integration",
+    "---Assistant behaviour---",
+    "...assistant",
+    "---REST API---",
+    "...api",
+    "---Reference---",
+    "reference",
+    "---Operations---",
+    "...operations"
+  ]
+}

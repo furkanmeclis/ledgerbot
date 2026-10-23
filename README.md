@@ -77,6 +77,17 @@ replies, approvals, audit log, AI usage and all settings, with a DEMO watermark.
 cd dashboard && docker compose up -d --build   # http://localhost:3000
 ```
 
+## Documentation site
+
+`docs-site/` is a password-protected documentation site (Next.js + Fumadocs, own image and
+compose) covering the Easytrade integration, the contracts, the REST API (generated from the
+OpenAPI files below) and operations. Production and staging base URLs are set by environment.
+
+```bash
+cd docs-site && cp .env.example .env    # set DOCS_PASSWORD, DOCS_PROD_URL, DOCS_STAGE_URL ...
+docker compose up -d --build            # http://localhost:3001
+```
+
 ## Contracts
 
 | Contract | File |

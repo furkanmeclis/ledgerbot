@@ -1,0 +1,18 @@
+# Ledgerbot documentation site: its own image and stack, independent of ledgerbot.
+#
+#   cp .env.example .env    # set DOCS_PASSWORD and the environment URLs
+#   docker compose up -d --build
+#   open http://localhost:3001
+name: ledgerbot-docs
+
+services:
+  docs:
+    build:
+      context: .
+      additional_contexts:
+        contracts: ../docs/contracts
+    image: ledgerbot-docs:local
+    env_file: .env
+    ports:
+      - "${DOCS_PORT:-3001}:3000"
+    restart: unless-stopped

@@ -1,0 +1,59 @@
+---
+title: Channels & identities
+description: WhatsApp, Telegram and e-mail connections, webhook URLs, and routing users on a shared number.
+icon: MessagesSquare
+---
+
+Channel connections are created through the REST API (`POST /v1/channels`, scope `channels`). Their
+credentials are encrypted with AES-256-GCM (`LEDGERBOT_SECRET_KEY`) and never returned. The
+response contains the `webhook_url` to configure at the provider:
+
+```text
+{LEDGERBOT_PUBLIC_URL}/webhooks/{kind}/{connection id}
+```
+
+For the selected environment: <BaseUrl path="/webhooks/{kind}/{connection id}" />
+
+| Kind | `config` | Inbound | Notes |
+|---|---|---|---|
+| `wuzapi` | `{base_url, token, hmac_key}`, `mode: per_company \| central` | WuzAPI webhook (HMAC verified) | Pair with `POST /v1/channels/{id}/connect` and `GET /v1/channels/{id}/qr`; `logout` ends the session |
+| `waba` | `{phone_number_id, access_token, app_secret, verify_token, api_version}` | Meta Cloud API webhook (`X-Hub-Signature-256`), `GET` verification challenge | Official WhatsApp Business API |
+| `telegram` | `{bot_token, mode: webhook \| poll, secret_token}` | Webhook with secret token, or long polling by a leased worker | |
+| `email` | `{address, webhook_secret, smtp_*, imap_*}` | IMAP/TLS polling (with `imap_host`) or inbound JSON webhook (`X-Ledgerbot-Secret`) | Replies over SMTP; attachments become documents |
+
+Example:
+
+```bash
+curl -s "$LEDGERBOT_URL/v1/channels" -H "Authorization: Bearer $LEDGERBOT_KEY" -d '{
+  "kind": "telegram",
+  "name": "Demo bot",
+  "config": { "bot_token": "123456:ABC…", "mode": "webhook", "secret_token": "s3cr3t" }
+}'
+```
+
+Easytrade can also send any message over a connection with `POST /v1/messages/send`
+(see [Write path → telling the user](/docs/integration/write-path#telling-the-user-what-happened)).
+
+## Listeners and failover
+
+Telegram long polling and IMAP mailboxes are "listeners". Each one is leased in PostgreSQL
+(20 s TTL, renewed every 5 s), so exactly one worker holds it; if that worker dies, another takes
+over within one TTL. `LEDGERBOT_MAX_LISTENERS` caps how many a worker replica holds.
+
+## Central numbers and identity routing
+
+A WhatsApp number (WuzAPI `central` mode, or one WABA number) or one Telegram bot can serve many
+companies. Ledgerbot then needs to know which companies a sender belongs to:
+
+```http
+GET {LEDGERBOT_HOST_API_URL}/identities?channel=wuzapi&address=%2B905320000002
+→ { "companies": ["demo", "demo2"] }
+```
+
+- One company: messages go to it directly.
+- Several companies: the user is asked to pick, and can switch at any time with
+  **"firmalar"** (list) and **"firma değiştir 2"** / **"firma değiştir &lt;ad&gt;"**.
+  `company_name` from the settings is shown in that list.
+
+Per-company numbers (`per_company` mode) need no identity lookup: the connection already belongs to
+one company.

@@ -1,0 +1,51 @@
+name: Docs site
+
+on:
+  push:
+    branches: [main]
+    paths: ['docs-site/**', 'docs/contracts/**', '.github/workflows/docs-site.yml']
+  pull_request:
+    paths: ['docs-site/**', 'docs/contracts/**', '.github/workflows/docs-site.yml']
+  workflow_dispatch:
+
+concurrency:
+  group: docs-site-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: docs-site
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: docs-site/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - name: Type check
+        run: npm run types:check
+      - uses: docker/setup-buildx-action@v3
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: docs-site
+          build-contexts: contracts=docs/contracts
+          load: true
+          tags: ledgerbot-docs:ci
+          cache-from: type=gha,scope=docs-site
+          cache-to: type=gha,mode=max,scope=docs-site
+      - name: Start container
+        run: |
+          docker run -d --name docs -p 3000:3000 \
+            -e DOCS_PASSWORD=ci-password -e DOCS_PROD_URL=https://ledgerbot.example.com \
+            ledgerbot-docs:ci
+          for i in $(seq 1 30); do curl -sf localhost:3000/api/health >/dev/null && break; sleep 1; done
+      - name: Smoke test (login gate, every page, every internal link)
+        run: DOCS_URL=http://localhost:3000 DOCS_PASSWORD=ci-password node scripts/check-site.mjs
+      - name: Container logs
+        if: failure()
+        run: docker logs docs

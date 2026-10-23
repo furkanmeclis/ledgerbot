@@ -1,0 +1,171 @@
+---
+title: Settings & system prompt
+description: The per-company settings contract served by Easytrade, field by field.
+icon: SlidersHorizontal
+---
+
+Each company's behaviour is configured by one JSON document that **Easytrade serves** and
+Ledgerbot reads. There is no Ledgerbot admin UI: what Easytrade returns is what applies.
+
+```http
+GET {LEDGERBOT_HOST_API_URL}/companies/{company}/settings
+Authorization: Bearer {LEDGERBOT_HOST_API_TOKEN}
+```
+
+Enable it in Ledgerbot with:
+
+```bash
+LEDGERBOT_TENANT_SOURCE=http                 # default "file" reads seed/companies/*.json
+LEDGERBOT_HOST_API_URL=https://app.easytrade.example/ledgerbot
+LEDGERBOT_HOST_API_TOKEN=<long random token>
+LEDGERBOT_TENANT_TTL=30s
+```
+
+## Caching and freshness
+
+- Settings and the [permission matrix](/docs/integration/permissions) are fetched together and
+  cached per company for `LEDGERBOT_TENANT_TTL` (default 30 s).
+- After the TTL one request refreshes the snapshot in the background (request coalescing) while
+  the others keep using the cached copy, so a slow Easytrade never slows the assistant down.
+- **Push changes immediately**: send `POST /v1/events` with `{"type":"settings.changed"}` using
+  the company's API key. The cached snapshot is dropped on the API replica that receives it and on
+  the worker that processes the event; other replicas pick the change up within the TTL. Operators
+  can also call `POST /admin/companies/{id}/invalidate` on a replica.
+- **Degraded mode**: if a refresh fails and an older snapshot exists, that snapshot is served with
+  `degraded: true`. In degraded mode **nothing is written** — drafts are not committed and
+  approvals answer `409`. If no snapshot exists at all, the API answers `503 settings_unavailable`.
+- `GET /v1/settings` returns the snapshot as Ledgerbot sees it, with secrets redacted.
+
+## Full example
+
+```json title="GET /companies/demo/settings"
+{
+  "company_id": "demo",
+  "company_name": "Demo Kırtasiye A.Ş.",
+  "version": 7,
+  "save_mode": "ask_approval",
+  "locale": "tr-TR",
+  "timezone": "Europe/Istanbul",
+  "ai_daily_limit": 500,
+  "providers": { "agent": "openai-mini", "extraction": "gemini-flash", "stt": "whisper" },
+  "api_keys": [
+    { "id": "easytrade-backend", "sha256": "59c7b9a3c6f7d1838ff3cb12d947dd5b75a2705ad9374149e2d918bb37eda2ed", "scopes": ["messages", "drafts", "events", "channels"] }
+  ],
+  "signing_secret": "",
+  "webhooks": [
+    { "url": "https://app.easytrade.example/api/ledgerbot/webhooks", "secret": "whsec_…", "events": ["draft.committed", "draft.rejected", "anomaly.detected"] }
+  ],
+  "rules": [
+    { "event": "stock.low", "notify_roles": ["owner", "accountant"], "throttle": "6h" },
+    { "event": "invoice.overdue", "notify_roles": ["owner", "accountant"], "throttle": "24h" }
+  ],
+  "reports": [
+    { "type": "daily_digest", "at": "08:30", "roles": ["owner"] },
+    { "type": "weekly_pnl", "at": "17:30", "weekday": 5, "roles": ["owner", "accountant"] },
+    { "type": "monthly_vat", "at": "10:00", "day": 20, "roles": ["accountant"] },
+    { "type": "cash_forecast", "roles": ["owner"] }
+  ],
+  "prompts": {
+    "system": "Firma bir kırtasiye ve ofis malzemeleri toptancısıdır. Kısa ve resmi cevap ver.",
+    "roles": { "sales": "Kullanıcı satış temsilcisidir, kayıt yetkisi yoktur." }
+  },
+  "plugins": []
+}
+```
+
+## Fields
+
+<TypeTable
+  type={{
+    save_mode: { type: '"reply_only" | "ask_approval" | "auto_save"', description: 'The most permissive mode for the company. Roles may only make it stricter.', required: true },
+    company_id: { type: 'string', description: 'Ignored on input; Ledgerbot uses the id from the path.' },
+    company_name: { type: 'string', description: 'Shown when a user on a central number switches companies.' },
+    version: { type: 'integer', description: 'Monotonic version. Increase it on every change.' },
+    locale: { type: 'string', description: 'tr-TR, en-US … Default language for alerts and reports. Replies follow the user\'s language (TR/EN/AR).' },
+    timezone: { type: 'string', description: 'IANA zone for scheduled reports. Default Europe/Istanbul.' },
+    ai_daily_limit: { type: 'integer', description: 'AI calls per day, 0 = unlimited. Rule-matched commands and e-invoice XML do not count.' },
+    providers: { type: '{agent?, extraction?, stt?}', description: 'Provider profile names from the deployment\'s providers file, per purpose. Empty = deployment default.' },
+    api_keys: { type: 'APIKey[]', description: 'Keys allowed to call /v1 for this company: {id, sha256, scopes}. See REST API → Authentication.' },
+    signing_secret: { type: 'string', description: 'When set, every /v1 request must carry a valid X-Ledgerbot-Signature.' },
+    webhooks: { type: 'Webhook[]', description: '{url, secret, events[]} — outbound event subscriptions. See Events.' },
+    rules: { type: 'Rule[]', description: '{event, notify_roles[], throttle?} — proactive alerts for inbound events.' },
+    reports: { type: 'Report[]', description: '{type, at?, weekday?, day?, roles[]} — scheduled reports.' },
+    prompts: { type: '{system?, roles?}', description: 'Host-provided instructions for the language model. See below.' },
+    plugins: { type: 'Plugin[]', description: 'Company-specific capabilities served over HTTPS. See below.' },
+  }}
+/>
+
+The JSON Schema is in [Contract schemas](/docs/reference/schemas#settings).
+
+## System prompt
+
+`prompts` lets Easytrade give the assistant company and role context without touching Ledgerbot:
+
+```json
+"prompts": {
+  "system": "Firma inşaat malzemesi satıyor. 'Demir' her zaman inşaat demiri anlamına gelir.",
+  "roles": {
+    "sales": "Kullanıcı saha satış temsilcisi; müşteri adlarını kısaltarak yazabilir.",
+    "accountant": "Kullanıcı muhasebeci; resmi terimler kullan."
+  }
+}
+```
+
+- The effective instruction is `system`, followed by the entry for the user's role (if any).
+- It is **appended** to Ledgerbot's fixed instructions. It can add sector knowledge, vocabulary
+  and tone; it **cannot** change the output contract, grant capabilities or bypass permissions.
+- It is used when a message is not matched by the deterministic rules and goes to the language
+  model. Amounts, balances and other capability output are still computed in code and sent
+  verbatim.
+- Keep it short and factual. Never put secrets or personal data in it — it is sent to the AI
+  provider.
+
+A natural place for this in Easytrade is a "Ledgerbot" tab in company settings, with one text area
+for the company and one per role, served by this endpoint.
+
+## Webhooks
+
+See [Write path](/docs/integration/write-path#option-1--signed-webhooks) and
+[Events](/docs/integration/events). Each entry has its own secret; patterns are globs
+(`draft.*`, `*`).
+
+## Rules (proactive alerts)
+
+When an inbound event (`stock.low`, `invoice.overdue`, `payment.received` …) matches a rule,
+users with the listed roles are notified on their preferred connected channel. `throttle`
+(a Go duration such as `6h`) sends at most one alert per entity and user within that window.
+
+## Reports
+
+| `type` | When | Extra fields |
+|---|---|---|
+| `daily_digest` | Every day at `at` (default 08:30) | — |
+| `weekly_pnl` | On `weekday` (1 = Monday … 7 = Sunday, default 5) at `at` | `weekday` |
+| `monthly_vat` | On `day` of month (1–28, default 25) at `at` | `day` |
+| `cash_forecast` | Checked daily; sent only when cash may go negative within 30 days | — |
+
+Reports are sent once per period and user, in the company's `timezone`.
+
+## Plugins
+
+A plugin adds a company-specific capability served by any HTTPS endpoint (often Easytrade itself):
+
+```json
+{
+  "name": "x_cek_durumu",
+  "description": "Show the status of a cheque by number",
+  "args": ["number"],
+  "url": "https://app.easytrade.example/api/ledgerbot/plugins/cek-durumu",
+  "secret": "plg_…",
+  "patterns": ["(?i)çek\\s+(?P<number>\\d+)\\s+durumu"],
+  "timeout_ms": 5000,
+  "write": false
+}
+```
+
+Ledgerbot `POST`s `{company_id, capability, actor{id, role, name}, args, text, language}` signed
+with `X-Ledgerbot-Signature` and expects `{text, summary?, record?}`. Names must start with `x_`
+and are granted in the permission matrix like built-in capabilities. With `write: true` the plugin
+may return a `record`; the save mode applies and it is committed as kind `custom` unless the record
+sets another kind. `patterns` are tried after the built-in rules and before the language model;
+named groups become arguments.

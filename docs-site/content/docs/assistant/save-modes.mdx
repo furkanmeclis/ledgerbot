@@ -1,0 +1,61 @@
+---
+title: Save modes & drafts
+description: When a prepared record is only shown, waits for approval, or is saved automatically.
+icon: FileCheck
+---
+
+Every write capability (collection, payment, expense, order, bank import, repeat last) produces a
+**draft**. The save mode decides what happens next.
+
+| Mode | Draft status | What the user sees | Committed |
+|---|---|---|---|
+| `reply_only` | `preview` | The computed record, clearly marked as a preview | Never |
+| `ask_approval` | `pending` | The record and a question: "Kaydedeyim mi? (evet / hayır)" | After approval |
+| `auto_save` | `pending` → `committed` | "Kaydedildi" with the summary | Immediately |
+
+## Effective mode
+
+```text
+company save_mode  ──▶  stricter of (company, role.save_mode)
+                         │
+                         ├─ anomaly detected?  → at least ask_approval
+                         └─ degraded settings? → reply_only
+```
+
+- Strictness order: `reply_only` > `ask_approval` > `auto_save`. A role can only move to the
+  left, never loosen the company setting.
+- An unusual amount (with at least three earlier records: more than 3× the counterparty's median
+  and over 1.000 TL above it) or the same amount for the same counterparty within a week turns an auto-save into an approval and emits
+  `anomaly.detected`.
+- In degraded mode (settings unreachable) nothing is written.
+
+## Approving and rejecting
+
+| Way | How |
+|---|---|
+| Chat | Reply **evet / onay / tamam / kaydet / yes / ok / ✅ / 👍** or **hayır / iptal / vazgeç / reddet / no / ❌**. Parsed without AI. |
+| REST | `POST /v1/drafts/{id}/approve` or `/reject` with `{"actor_id": "u-acc"}` |
+
+A chat approval applies to the latest pending draft created from the same channel and sender in
+the last 30 minutes; older pending drafts can still be approved over REST. Approval rechecks permissions: the approver's role must allow the
+capability, and with `scope: "own"` only the creator may approve. A draft that is no longer
+pending, or degraded settings, answers `409`.
+
+## Lifecycle
+
+```text
+               ┌────────── reply_only ──────────▶ preview
+ capability ───┤
+               └─ ask_approval / auto_save ─▶ pending ──approve──▶ committed  (draft.committed)
+                                                 │
+                                                 └──reject───▶ rejected   (draft.rejected)
+```
+
+If the commit itself fails (data provider error), the draft stays `pending`, an audit entry
+`draft.commit_failed` is written, and the user is told; approving again retries.
+
+## Duplicates
+
+Documents (receipts, e-invoices, bank statements) are fingerprinted. Sending the same document
+again returns "already recorded", creates no draft, and emits `draft.duplicate` with the previous
+draft id.

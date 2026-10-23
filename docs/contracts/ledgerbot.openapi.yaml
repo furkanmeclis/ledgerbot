@@ -22,6 +22,18 @@ info:
     **Rate limits**: per company token bucket (default 20 rps, burst 40, per replica).
 servers:
   - url: http://localhost:8080
+tags:
+  - { name: Messages, description: "Run the assistant on behalf of a user or send a message over a channel" }
+  - { name: Drafts, description: "Records prepared by the assistant and their approval lifecycle" }
+  - { name: Events, description: "Host events pushed into ledgerbot" }
+  - { name: Channels, description: "WhatsApp, Telegram and e-mail connections" }
+  - { name: Assistant, description: "Capabilities and effective settings" }
+  - { name: Usage and audit, description: "AI cost tracking and the audit log" }
+  - { name: Data protection, description: "KVKK / GDPR / Meta data deletion" }
+  - { name: Channel webhooks, description: "Inbound provider webhooks (no API key; verified per provider)" }
+  - { name: System, description: "Health and metrics" }
+  - { name: Admin, description: "Operator endpoints (LEDGERBOT_ADMIN_TOKEN)" }
+  - { name: Development, description: "Only when LEDGERBOT_DEV=true" }
 security:
   - apiKey: []
 components:
@@ -97,14 +109,16 @@ components:
         status: { type: string, example: queued }
 paths:
   /healthz:
-    get: { security: [], summary: Liveness, responses: { '200': { description: alive } } }
+    get: { tags: [System], operationId: liveness, security: [], summary: Liveness, responses: { '200': { description: alive } } }
   /readyz:
-    get: { security: [], summary: Readiness (database reachable), responses: { '200': { description: ready }, '503': { description: not ready } } }
+    get: { tags: [System], operationId: readiness, security: [], summary: Readiness (database reachable), responses: { '200': { description: ready }, '503': { description: not ready } } }
   /metrics:
-    get: { security: [], summary: Prometheus metrics, responses: { '200': { description: text exposition } } }
+    get: { tags: [System], operationId: metrics, security: [], summary: Prometheus metrics, responses: { '200': { description: text exposition } } }
 
   /v1/capabilities:
     get:
+      tags: [Assistant]
+      operationId: listCapabilities
       summary: List capabilities and which roles may use them
       responses:
         '200':
@@ -132,11 +146,15 @@ paths:
 
   /v1/settings:
     get:
+      tags: [Assistant]
+      operationId: getEffectiveSettings
       summary: Current settings and permission matrix as ledgerbot sees them (secrets redacted)
       responses: { '200': { description: OK } }
 
   /v1/messages:
     post:
+      tags: [Messages]
+      operationId: analyzeMessage
       summary: Analyze a message on behalf of a user
       description: |
         Runs the assistant as `actor_id` (a user in the permission matrix). Text, image,
@@ -162,6 +180,8 @@ paths:
 
   /v1/messages/send:
     post:
+      tags: [Messages]
+      operationId: sendMessage
       summary: Send a message over a connected channel
       parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
       requestBody:
@@ -181,6 +201,8 @@ paths:
 
   /v1/drafts:
     get:
+      tags: [Drafts]
+      operationId: listDrafts
       summary: List drafts (keyset pagination)
       parameters:
         - { name: status, in: query, schema: { type: string } }
@@ -200,11 +222,15 @@ paths:
                       next_before: { type: string }
   /v1/drafts/{id}:
     get:
+      tags: [Drafts]
+      operationId: getDraft
       summary: Get a draft
       parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
       responses: { '200': { description: OK }, '404': { description: Not found } }
   /v1/drafts/{id}/approve:
     post:
+      tags: [Drafts]
+      operationId: approveDraft
       summary: Approve a pending draft (commits it to the data provider)
       parameters: [{ name: id, in: path, required: true, schema: { type: string } }, { $ref: '#/components/parameters/IdempotencyKey' }]
       requestBody:
@@ -212,6 +238,8 @@ paths:
       responses: { '200': { description: Committed }, '409': { description: Not pending, not permitted, or settings degraded } }
   /v1/drafts/{id}/reject:
     post:
+      tags: [Drafts]
+      operationId: rejectDraft
       summary: Reject a pending draft
       parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
       requestBody:
@@ -220,9 +248,13 @@ paths:
 
   /v1/channels:
     get:
+      tags: [Channels]
+      operationId: listChannels
       summary: List channel connections (credentials are never returned)
       responses: { '200': { description: OK } }
     post:
+      tags: [Channels]
+      operationId: upsertChannel
       summary: Create or update a channel connection
       description: |
         `config` is stored encrypted (AES-256-GCM). Shapes per kind:
@@ -248,23 +280,29 @@ paths:
       responses: { '200': { description: Saved } }
   /v1/channels/{id}:
     delete:
+      tags: [Channels]
+      operationId: deleteChannel
       summary: Delete a connection
       parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
       responses: { '200': { description: Deleted } }
   /v1/channels/{id}/status:
     get:
+      tags: [Channels]
+      operationId: getChannelStatus
       summary: Live connection status (connected, waiting_qr, disconnected, error)
       parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
       responses: { '200': { description: OK } }
   /v1/channels/{id}/connect:
-    post: { summary: Start a WuzAPI session (QR becomes available), parameters: [{ name: id, in: path, required: true, schema: { type: string } }], responses: { '200': { description: OK } } }
+    post: { tags: [Channels], operationId: connectChannel, summary: Start a WuzAPI session (QR becomes available), parameters: [{ name: id, in: path, required: true, schema: { type: string } }], responses: { '200': { description: OK } } }
   /v1/channels/{id}/qr:
-    get: { summary: WuzAPI pairing QR as a data URL, parameters: [{ name: id, in: path, required: true, schema: { type: string } }], responses: { '200': { description: OK } } }
+    get: { tags: [Channels], operationId: getChannelQr, summary: WuzAPI pairing QR as a data URL, parameters: [{ name: id, in: path, required: true, schema: { type: string } }], responses: { '200': { description: OK } } }
   /v1/channels/{id}/logout:
-    post: { summary: Log out a WuzAPI session, parameters: [{ name: id, in: path, required: true, schema: { type: string } }], responses: { '200': { description: OK } } }
+    post: { tags: [Channels], operationId: logoutChannel, summary: Log out a WuzAPI session, parameters: [{ name: id, in: path, required: true, schema: { type: string } }], responses: { '200': { description: OK } } }
 
   /v1/events:
     post:
+      tags: [Events]
+      operationId: pushEvent
       summary: Push a host event (stock.low, invoice.overdue, payment.received, settings.changed ...)
       description: See event.schema.json. Events trigger rules (alerts) and webhook fan-out.
       parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
@@ -283,6 +321,8 @@ paths:
 
   /v1/usage:
     get:
+      tags: [Usage and audit]
+      operationId: getUsage
       summary: AI usage and cost per purpose/provider/model, plus today's quota
       parameters:
         - { name: from, in: query, schema: { type: string, format: date } }
@@ -290,6 +330,8 @@ paths:
       responses: { '200': { description: OK } }
   /v1/audit:
     get:
+      tags: [Usage and audit]
+      operationId: listAudit
       summary: Audit log (newest first)
       parameters:
         - { name: before_id, in: query, schema: { type: integer } }
@@ -298,18 +340,24 @@ paths:
 
   /v1/deletion-requests:
     post:
+      tags: [Data protection]
+      operationId: createDeletionRequest
       summary: Request deletion of a data subject (KVKK / GDPR)
       requestBody:
         content: { application/json: { schema: { type: object, required: [subject], properties: { channel: { type: string }, subject: { type: string, description: 'phone, chat id or e-mail' } } } } }
       responses: { '202': { description: Accepted } }
   /v1/deletion-requests/{id}:
     get:
+      tags: [Data protection]
+      operationId: getDeletionRequest
       summary: Deletion request status
       parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
       responses: { '200': { description: OK } }
 
   /v1/dev/messages:
     post:
+      tags: [Development]
+      operationId: devMessage
       summary: '[dev] Send a message as a dev-channel user (LEDGERBOT_DEV=true)'
       requestBody:
         content:
@@ -325,14 +373,18 @@ paths:
       responses: { '200': { description: Reply }, '202': { description: Queued } }
   /v1/dev/outbox:
     get:
+      tags: [Development]
+      operationId: devOutbox
       summary: '[dev] Replies sent to a dev user'
       parameters: [{ name: to, in: query, required: true, schema: { type: string } }]
       responses: { '200': { description: OK } }
   /v1/simulator/run:
-    post: { summary: '[dev] Run one simulator round (fake sales, stock and overdue events)', responses: { '200': { description: OK } } }
+    post: { tags: [Development], operationId: runSimulator, summary: '[dev] Run one simulator round (fake sales, stock and overdue events)', responses: { '200': { description: OK } } }
 
   /webhooks/{kind}/{connID}:
     post:
+      tags: [Channel webhooks]
+      operationId: channelWebhook
       security: []
       summary: Inbound channel webhook (Telegram, WuzAPI, Meta WABA, e-mail inbound JSON)
       parameters:
@@ -340,6 +392,8 @@ paths:
         - { name: connID, in: path, required: true, schema: { type: string } }
       responses: { '200': { description: Queued }, '401': { description: Signature check failed } }
     get:
+      tags: [Channel webhooks]
+      operationId: channelWebhookVerify
       security: []
       summary: Meta webhook verification (hub.challenge)
       parameters:
@@ -348,6 +402,8 @@ paths:
       responses: { '200': { description: Challenge echoed } }
   /webhooks/meta/data-deletion:
     post:
+      tags: [Data protection]
+      operationId: metaDataDeletion
       security: []
       summary: Meta Data Deletion Request Callback (signed_request)
       requestBody:
@@ -357,8 +413,26 @@ paths:
           description: Meta-compatible response
           content: { application/json: { schema: { type: object, properties: { url: { type: string }, confirmation_code: { type: string } } } } }
 
+  /deletion-status/{code}:
+    get:
+      tags: [Data protection]
+      operationId: deletionStatus
+      security: []
+      summary: Status page for a Meta data deletion confirmation code
+      parameters: [{ name: code, in: path, required: true, schema: { type: string } }]
+      responses: { '200': { description: OK } }
+
+  /admin/companies/{id}/invalidate:
+    post:
+      tags: [Admin]
+      operationId: invalidateCompany
+      summary: Drop the cached settings and permission matrix of a company. Admin token.
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses: { '200': { description: OK } }
   /admin/jobs:
     get:
+      tags: [Admin]
+      operationId: listJobs
       summary: Jobs by state (default discarded = dead letters). Admin token.
       parameters:
         - { name: state, in: query, schema: { type: string, enum: [available, running, retryable, discarded, cancelled, completed] } }

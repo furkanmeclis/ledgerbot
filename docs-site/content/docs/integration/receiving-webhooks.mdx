@@ -1,0 +1,312 @@
+---
+title: Receiving webhooks
+description: A complete, production-shaped webhook receiver for Laravel, plus signature checks in other languages.
+icon: Webhook
+---
+
+This page shows one way to implement [option 1 of the write path](/docs/integration/write-path) in a
+Laravel 12 application. It keeps the HTTP handler tiny (verify, de-duplicate, queue, `202`) and
+does the accounting work in a queued job that calls the same services the Easytrade UI uses.
+
+<Callout title="Rules every receiver must follow">
+  1. Verify `X-Ledgerbot-Signature` against the **raw** request body before parsing it.
+  2. Reject timestamps older than 5 minutes (replay protection).
+  3. Treat delivery as **at least once**: de-duplicate on the event id and on the draft id.
+  4. Answer within 10 seconds. Do the work in a queue.
+  5. Return `410 Gone` only when you never want this event again.
+</Callout>
+
+## The signature
+
+```text
+X-Ledgerbot-Signature: t=1792748472,v1=5f0e7c...e21a
+v1 = hex( HMAC-SHA256( secret, t + "." + raw_body ) )
+```
+
+The secret is the `secret` of the webhook entry in the [settings contract](/docs/integration/settings#webhooks).
+Use a random value of at least 32 bytes per company and rotate it by publishing a new settings
+version.
+
+## Laravel implementation
+
+<Steps>
+<Step>
+
+### Route
+
+```php title="routes/api.php"
+use App\Http\Controllers\Ledgerbot\WebhookController;
+use App\Http\Middleware\VerifyLedgerbotSignature;
+
+Route::post('/ledgerbot/webhooks', WebhookController::class)
+    ->middleware(VerifyLedgerbotSignature::class)
+    ->withoutMiddleware(['auth:sanctum'])          // authenticated by the signature
+    ->name('ledgerbot.webhooks');
+```
+
+</Step>
+<Step>
+
+### Signature middleware
+
+The secret depends on the company in the payload, so the middleware reads `company_id` from the
+raw body, looks up that company's webhook secret, and verifies the HMAC before anything else runs.
+
+```php title="app/Http/Middleware/VerifyLedgerbotSignature.php"
+<?php
+
+namespace App\Http\Middleware;
+
+use App\Models\Company;
+use Closure;
+use Illuminate\Http\Request;
+use Symfony\Component\HttpFoundation\Response;
+
+class VerifyLedgerbotSignature
+{
+    private const TOLERANCE = 300; // seconds
+
+    public function handle(Request $request, Closure $next): Response
+    {
+        $raw = $request->getContent();
+        $header = (string) $request->header('X-Ledgerbot-Signature', '');
+
+        $parts = [];
+        foreach (explode(',', $header) as $pair) {
+            [$k, $v] = array_pad(explode('=', trim($pair), 2), 2, '');
+            $parts[$k] = $v;
+        }
+        $t = (int) ($parts['t'] ?? 0);
+        $sig = (string) ($parts['v1'] ?? '');
+        if ($t === 0 || $sig === '' || abs(time() - $t) > self::TOLERANCE) {
+            abort(401, 'invalid signature');
+        }
+
+        $companyId = json_decode($raw, true)['company_id'] ?? null;
+        $secret = $companyId ? Company::ledgerbotWebhookSecret($companyId) : null;
+        if (! $secret) {
+            abort(401, 'unknown company');
+        }
+
+        $expected = hash_hmac('sha256', $t.'.'.$raw, $secret);
+        if (! hash_equals($expected, $sig)) {
+            abort(401, 'invalid signature');
+        }
+
+        return $next($request);
+    }
+}
+```
+
+`Company::ledgerbotWebhookSecret()` is whatever stores the secret you publish in the settings
+contract (an encrypted column is enough).
+
+</Step>
+<Step>
+
+### De-duplication table
+
+```php title="database/migrations/2026_10_23_000000_create_ledgerbot_deliveries_table.php"
+Schema::create('ledgerbot_deliveries', function (Blueprint $table) {
+    $table->string('event_id')->primary();          // X-Ledgerbot-Delivery / envelope id
+    $table->string('event_type', 64);
+    $table->string('company_id')->index();
+    $table->string('draft_id')->nullable()->unique(); // one record per draft, ever
+    $table->string('status', 16)->default('queued');  // queued | done | failed | ignored
+    $table->string('record_ref')->nullable();          // Easytrade record id
+    $table->text('error')->nullable();
+    $table->timestamps();
+});
+```
+
+</Step>
+<Step>
+
+### Controller
+
+```php title="app/Http/Controllers/Ledgerbot/WebhookController.php"
+<?php
+
+namespace App\Http\Controllers\Ledgerbot;
+
+use App\Jobs\Ledgerbot\CommitLedgerbotRecord;
+use Illuminate\Database\QueryException;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+
+class WebhookController
+{
+    public function __invoke(Request $request)
+    {
+        $event = $request->json()->all();
+        $type = $event['type'] ?? '';
+
+        if ($type !== 'draft.committed') {
+            // draft.rejected, anomaly.detected, deletion.completed ... handle or ignore.
+            return response()->noContent();
+        }
+
+        $draftId = $event['data']['id'] ?? null;
+        try {
+            DB::table('ledgerbot_deliveries')->insert([
+                'event_id' => $event['id'],
+                'event_type' => $type,
+                'company_id' => $event['company_id'],
+                'draft_id' => $draftId,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+        } catch (QueryException $e) {
+            // Unique violation: this event or this draft was already accepted. Acknowledge again.
+            return response()->json(['status' => 'duplicate'], 200);
+        }
+
+        CommitLedgerbotRecord::dispatch($event['company_id'], $event['data']);
+
+        return response()->json(['status' => 'queued'], 202);
+    }
+}
+```
+
+</Step>
+<Step>
+
+### The job
+
+```php title="app/Jobs/Ledgerbot/CommitLedgerbotRecord.php"
+<?php
+
+namespace App\Jobs\Ledgerbot;
+
+use Illuminate\Bus\Queueable;
+use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Foundation\Bus\Dispatchable;
+use Illuminate\Support\Facades\DB;
+
+class CommitLedgerbotRecord implements ShouldQueue
+{
+    use Dispatchable, Queueable;
+
+    public int $tries = 5;
+
+    public function __construct(public string $companyId, public array $draft) {}
+
+    public function handle(): void
+    {
+        $record = $this->draft['payload'];          // amounts in kuruş, quantities in thousandths
+
+        // A batch (bank statement import) is committed all or nothing.
+        $ref = DB::transaction(fn () => $this->commitOne($record));
+
+        DB::table('ledgerbot_deliveries')->where('draft_id', $this->draft['id'])
+            ->update(['status' => 'done', 'record_ref' => $ref, 'updated_at' => now()]);
+    }
+
+    private function commitOne(array $record): string
+    {
+        return match ($record['kind']) {
+            'collection' => app(\App\Services\CollectionService::class)->createFromLedgerbot($this->companyId, $record),
+            'payment'    => app(\App\Services\PaymentService::class)->createFromLedgerbot($this->companyId, $record),
+            'expense'    => app(\App\Services\ExpenseService::class)->createFromLedgerbot($this->companyId, $record),
+            'order'      => app(\App\Services\B2bOrderService::class)->createFromLedgerbot($this->companyId, $record),
+            'batch'      => collect($record['items'])->map(fn (array $item) => $this->commitOne($item))->implode(','),
+            default      => throw new \DomainException("unsupported kind {$record['kind']}"),
+        };
+    }
+}
+```
+
+The service names are placeholders for the existing Easytrade services. Convert kuruş with
+`$record['amount'] / 100` only at the boundary where Easytrade expects decimals, and keep
+`draft_id` on the created record for traceability.
+
+</Step>
+</Steps>
+
+## Verifying in other languages
+
+<Tabs items={['Node.js', 'Go', 'Python']}>
+<Tab value="Node.js">
+
+```ts
+import { createHmac, timingSafeEqual } from 'node:crypto';
+
+export function verify(secret: string, header: string, rawBody: Buffer, toleranceSec = 300): boolean {
+  const parts = Object.fromEntries(header.split(',').map((p) => p.trim().split('=', 2)));
+  const t = Number(parts.t);
+  if (!t || !parts.v1 || Math.abs(Date.now() / 1000 - t) > toleranceSec) return false;
+  const expected = createHmac('sha256', secret).update(`${t}.`).update(rawBody).digest();
+  const given = Buffer.from(parts.v1, 'hex');
+  return given.length === expected.length && timingSafeEqual(given, expected);
+}
+```
+
+</Tab>
+<Tab value="Go">
+
+```go
+// Ledgerbot's own implementation lives in internal/sign.
+func Verify(secret, header string, body []byte) bool {
+	var ts, sig string
+	for _, part := range strings.Split(header, ",") {
+		k, v, _ := strings.Cut(strings.TrimSpace(part), "=")
+		switch k {
+		case "t":
+			ts = v
+		case "v1":
+			sig = v
+		}
+	}
+	t, err := strconv.ParseInt(ts, 10, 64)
+	if err != nil || time.Since(time.Unix(t, 0)).Abs() > 5*time.Minute {
+		return false
+	}
+	want, err := hex.DecodeString(sig)
+	if err != nil {
+		return false
+	}
+	m := hmac.New(sha256.New, []byte(secret))
+	m.Write([]byte(ts + "."))
+	m.Write(body)
+	return hmac.Equal(want, m.Sum(nil))
+}
+```
+
+</Tab>
+<Tab value="Python">
+
+```python
+import hashlib, hmac, time
+
+def verify(secret: str, header: str, raw_body: bytes, tolerance: int = 300) -> bool:
+    parts = dict(p.strip().split("=", 1) for p in header.split(",") if "=" in p)
+    t, sig = parts.get("t", ""), parts.get("v1", "")
+    if not t.isdigit() or not sig or abs(time.time() - int(t)) > tolerance:
+        return False
+    expected = hmac.new(secret.encode(), t.encode() + b"." + raw_body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, sig)
+```
+
+</Tab>
+</Tabs>
+
+## Testing a receiver
+
+Sign a sample body yourself and send it to the staging receiver:
+
+```bash
+SECRET=whsec_test
+BODY='{"id":"evt_test1","type":"draft.committed","company_id":"demo","source":"ledgerbot","occurred_at":"2026-10-23T09:41:12Z","data":{"id":"drf_test1","status":"committed","payload":{"kind":"collection","customer_id":"C-1001","amount":500000,"date":"2026-10-23T09:40:58Z","draft_id":"drf_test1"}}}'
+T=$(date +%s)
+SIG=$(printf '%s.%s' "$T" "$BODY" | openssl dgst -sha256 -hmac "$SECRET" -hex | sed 's/^.* //')
+curl -i https://stage.easytrade.example/api/ledgerbot/webhooks \
+  -H 'Content-Type: application/json' -H 'X-Ledgerbot-Event: draft.committed' \
+  -H 'X-Ledgerbot-Delivery: evt_test1' -H "X-Ledgerbot-Signature: t=$T,v1=$SIG" \
+  --data-raw "$BODY"
+```
+
+Sending it twice must create one record. Changing one byte of the body must return `401`.
+
+On a local Ledgerbot (`LEDGERBOT_DEV=true`), `POST /v1/simulator/run` produces events, and any
+dev-channel message that commits a draft produces a real `draft.committed` delivery to the
+webhook configured in the seed file.

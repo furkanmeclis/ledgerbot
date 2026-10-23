@@ -1,0 +1,243 @@
+---
+title: Write path
+description: How records prepared by Ledgerbot become records in Easytrade.
+icon: PenLine
+---
+
+When a user says *"Ahmet Yılmaz'dan 5.000 TL havale ile tahsilat"* or sends a receipt photo,
+Ledgerbot prepares a **draft**: a fully computed record (amounts in kuruş, VAT, line items,
+invoice allocations). Depending on the [save mode](/docs/assistant/save-modes) the draft is shown
+as a preview, waits for approval, or is committed immediately. **Committing** is the moment the
+record must appear in Easytrade. There are two ways to make that happen.
+
+| | Option 1 — Signed webhooks (recommended) | Option 2 — Ledgerbot calls Easytrade |
+|---|---|---|
+| Who writes into Easytrade | Easytrade's own code, in its own transaction | Ledgerbot, over HTTP |
+| Easytrade work | One webhook receiver (controller + job) | One endpoint (`POST /companies/{id}/records`) or an adapter for the existing B2B API |
+| Credentials Easytrade gives out | None (Easytrade verifies Ledgerbot's signature) | A token Ledgerbot holds (global or per company) |
+| Validation & business rules | Applied by Easytrade, unchanged | Applied by Easytrade behind the endpoint |
+| Coupling | Lowest: Easytrade can ignore, queue, or reshape events | Ledgerbot must know the endpoint shape |
+| Failure handling | Ledgerbot retries delivery 12× with backoff; `410` stops | The draft stays `pending` with a `draft.commit_failed` audit entry; the user is told it failed |
+| Feedback to the user | Asynchronous (Easytrade can notify via `/v1/messages/send`) | Synchronous ("Kaydedildi") |
+
+<Callout title="Why option 1 is recommended">
+  Easytrade stays the only system that writes its own tables. The receiver reuses the same
+  services the Easytrade UI uses (tahsilat, ödeme, gider, sipariş), so validation, numbering,
+  e-invoice rules and audit stay exactly as they are. Nothing in Easytrade has to be exposed to
+  Ledgerbot, and the integration can be switched off by removing one webhook subscription.
+</Callout>
+
+---
+
+## Option 1 — Signed webhooks
+
+### How it works
+
+<Steps>
+<Step>
+
+**Subscribe.** The company settings contain a webhook entry:
+
+```json
+{
+  "webhooks": [
+    {
+      "url": "https://app.easytrade.example/api/ledgerbot/webhooks",
+      "secret": "whsec_7c1f...",
+      "events": ["draft.committed", "draft.rejected", "anomaly.detected", "deletion.completed"]
+    }
+  ]
+}
+```
+
+`events` are glob patterns (`draft.*`, `*`). Ledgerbot only enqueues an event if at least one
+webhook of that company subscribes to it, so unused event types cost nothing.
+
+</Step>
+<Step>
+
+**Ledgerbot commits the draft** (auto-save, a "evet" in chat, or
+`POST /v1/drafts/{id}/approve`) and emits `draft.committed`.
+
+</Step>
+<Step>
+
+**Ledgerbot delivers** `POST <url>` with the [event envelope](/docs/integration/events) as the body
+and these headers:
+
+| Header | Value |
+|---|---|
+| `Content-Type` | `application/json` |
+| `User-Agent` | `ledgerbot-webhooks/1` |
+| `X-Ledgerbot-Event` | Event type, e.g. `draft.committed` |
+| `X-Ledgerbot-Delivery` | Event id (`evt_…`), identical on every retry |
+| `X-Ledgerbot-Signature` | `t=<unix>,v1=<hex HMAC-SHA256(secret, t + "." + body)>` |
+
+</Step>
+<Step>
+
+**Easytrade verifies, de-duplicates and records.** The receiver checks the signature, ignores
+deliveries it has already processed (by `data.id`, the draft id), turns `data.payload` into an
+Easytrade record, and answers `2xx` quickly. See
+[Receiving webhooks](/docs/integration/receiving-webhooks) for a complete Laravel implementation.
+
+</Step>
+</Steps>
+
+### Delivery semantics
+
+- **At least once.** Any non-`2xx` answer or a timeout (10 s) is retried with exponential backoff,
+  up to **12 attempts**. Use the draft id as the idempotency key.
+- **`410 Gone`** stops delivery of that event permanently (use it if a company was removed).
+- **Ordering is not guaranteed** between different drafts. A single draft only ever produces
+  `draft.created` → (`draft.committed` | `draft.rejected`).
+- Deliveries run on their own queue, so slow receivers never delay the assistant.
+
+### `draft.committed` example
+
+```json
+{
+  "id": "evt_5b0c8f2d6a4e4a1b9f3e2d1c0b9a8f7e",
+  "type": "draft.committed",
+  "company_id": "demo",
+  "source": "ledgerbot",
+  "occurred_at": "2026-10-23T09:41:12.481Z",
+  "data": {
+    "id": "drf_0f6e1b2c3d4e5f60718293a4b5c6d7e8",
+    "company_id": "demo",
+    "actor_id": "u-acc",
+    "capability": "record_collection",
+    "status": "committed",
+    "summary": "Ahmet Yılmaz · tahsilat · 5.000,00 TL · havale",
+    "external_id": "FAKE-drf_0f6e1b2c3d4e5f60718293a4b5c6d7e8",
+    "channel": "wuzapi",
+    "sender": "+905320000002",
+    "created_at": "2026-10-23T09:40:58.102Z",
+    "updated_at": "2026-10-23T09:41:12.477Z",
+    "payload": {
+      "kind": "collection",
+      "customer_id": "C-1001",
+      "date": "2026-10-23T09:40:58Z",
+      "method": "havale",
+      "amount": 500000,
+      "allocations": [
+        { "invoice_no": "EAS2026000000123", "amount": 350000 },
+        { "invoice_no": "EAS2026000000141", "amount": 150000 }
+      ],
+      "actor_id": "u-acc",
+      "draft_id": "drf_0f6e1b2c3d4e5f60718293a4b5c6d7e8"
+    }
+  }
+}
+```
+
+### Current status and the planned `events` write mode
+
+<Callout type="warn" title="Read this before going live with option 1">
+  Today a draft is committed through the configured **data provider** first, and
+  `draft.committed` is emitted after that succeeds:
+
+  - `LEDGERBOT_DATA_DRIVER=fake` — the record goes into Ledgerbot's own demo ledger
+    (`external_id` = `FAKE-<draft id>`) and the webhook carries it to Easytrade. Good for a
+    pilot and for building the receiver.
+  - `LEDGERBOT_DATA_DRIVER=api` — the record is also `POST`ed to the host contract (option 2).
+
+  For a production option 1 setup, a small Ledgerbot change is planned: an `events` write mode
+  in which committing only marks the draft and emits `draft.committed`, with Easytrade as the
+  only system of record, while reads keep using the `api` driver. Easytrade can then report its
+  own record id back via the `external_id`. Track this on the
+  [roadmap](https://github.com/furkanmeclis/ledgerbot/blob/main/docs/ROADMAP.md).
+</Callout>
+
+### Telling the user what happened
+
+Because Easytrade writes asynchronously, it may want to confirm or report a problem to the user.
+It can send a message over the user's channel:
+
+```bash
+curl -s "$LEDGERBOT_URL/v1/messages/send" \
+  -H "Authorization: Bearer $LEDGERBOT_KEY" -H "Idempotency-Key: rec-ok-drf_0f6e…" \
+  -d '{"channel":"wuzapi","to":"+905320000002","text":"✅ Tahsilat kaydedildi: TH-2026-000981"}'
+```
+
+`data.channel` and `data.sender` on the draft say where the request came from.
+
+---
+
+## Option 2 — Ledgerbot calls Easytrade
+
+### 2a. Host contract endpoint (implemented)
+
+With `LEDGERBOT_DATA_DRIVER=api`, Ledgerbot commits by calling
+
+```http
+POST {LEDGERBOT_HOST_API_URL}/companies/{company}/records
+Authorization: Bearer {LEDGERBOT_HOST_API_TOKEN}
+Idempotency-Key: {draft_id}
+Content-Type: application/json
+
+{ ...the record payload below... }
+```
+
+and expects `200 {"external_id": "..."}`. The endpoint **must be idempotent on `draft_id`**:
+when the same draft id arrives again, return the existing record's id instead of creating a new
+one. Any `4xx/5xx` keeps the draft `pending`, writes a `draft.commit_failed` audit entry and tells
+the user the record could not be saved; the user (or `POST /v1/drafts/{id}/approve`) can retry.
+
+In Easytrade this is a thin controller over the existing services: resolve the company from the
+path, map `kind` to the right service, run it in a transaction, store `draft_id` in a unique
+column. The full request and response schema is in the
+[host API reference](/docs/reference/host-api/data-provider/commit-record).
+
+### 2b. Existing B2B API and `/api/sync` with a `CompanyApiToken`
+
+Easytrade already has a B2B API, a `/api/sync` endpoint and per-company `CompanyApiToken`s.
+Ledgerbot could write through those instead of a new endpoint. This needs:
+
+- an **Easytrade adapter driver** in Ledgerbot that maps each record kind onto the existing B2B
+  calls (planned, not implemented), and
+- a place for the per-company token: either the settings contract (encrypted at rest by
+  Ledgerbot) or one integration token with company scoping.
+
+Choose 2b only if the existing endpoints already cover collections, payments, expenses with
+lines, orders and batches with the same validation as the UI. Otherwise 2a or option 1 is less
+work.
+
+---
+
+## The record payload
+
+The same object appears as `data.payload` in webhooks and as the body of `POST /records`.
+Exactly the fields relevant to `kind` are set.
+
+<TypeTable
+  type={{
+    kind: { type: '"collection" | "payment" | "expense" | "order" | "custom" | "batch"', description: 'tahsilat, ödeme, gider/alış faturası, B2B sipariş, plugin record, or several records committed together (bank statement import).', required: true },
+    draft_id: { type: 'string', description: 'Idempotency key towards the host. Unique per draft.', required: true },
+    actor_id: { type: 'string', description: 'The user from the permission matrix who created the draft.' },
+    date: { type: 'string (date-time)', description: 'Document or transaction date.', required: true },
+    amount: { type: 'integer (kuruş)', description: 'Gross total, VAT included.', required: true },
+    vat: { type: 'integer (kuruş)', description: 'VAT total (expenses).' },
+    customer_id: { type: 'string', description: 'Host customer (cari) id: collections, payments, orders.' },
+    vendor: { type: 'string', description: 'Supplier name for expenses.' },
+    vendor_tax_id: { type: 'string', description: 'Supplier VKN/TCKN when known (e-invoice, receipt).' },
+    document_no: { type: 'string', description: 'Invoice / receipt number.' },
+    method: { type: 'string', description: 'nakit, havale, kart, çek.' },
+    note: { type: 'string', description: 'Free text.' },
+    reference: { type: 'string', description: 'External reference, e.g. bank receipt number.' },
+    lines: { type: 'Line[]', description: 'Item lines: product_id?, name, quantity (thousandths), unit, unit_price, vat_rate, total (all kuruş).' },
+    allocations: { type: 'Allocation[]', description: 'Collections only: open invoices this payment closes ({invoice_no, amount}), computed by Ledgerbot. The remainder is an advance.' },
+    items: { type: 'Record[]', description: 'Batch only: the records to commit together.' },
+  }}
+/>
+
+### Mapping to Easytrade
+
+| `kind` | Easytrade concept | Notes |
+|---|---|---|
+| `collection` | Tahsilat on the customer's cari | Apply `allocations` to the listed invoices; `method` selects cash / bank. |
+| `payment` | Ödeme | Same shape as collection, money going out. |
+| `expense` | Gider / alış faturası | `lines` carry product lines from receipts or UBL-TR e-invoices; `vendor_tax_id` and `document_no` help match the supplier and detect duplicates. |
+| `order` | B2B sipariş | `lines[].product_id` refers to host product ids returned by the read path. |
+| `batch` | Several of the above in one transaction | Produced by bank statement imports; commit all or nothing. |
+| `custom` | Company-specific plugin output | Only if the company uses [plugins](/docs/integration/settings#plugins). |

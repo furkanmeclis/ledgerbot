@@ -1,0 +1,39 @@
+---
+title: Security & data protection
+description: Credentials, signatures, encryption, retention and KVKK / Meta data deletion.
+icon: Lock
+---
+
+## Credentials and signatures
+
+| Direction | Mechanism |
+|---|---|
+| Easytrade → Ledgerbot `/v1` | `Bearer lb_<company>_<secret>`; only SHA-256 digests are known to Ledgerbot; optional HMAC request signing |
+| Ledgerbot → Easytrade host contract | One bearer token (`LEDGERBOT_HOST_API_TOKEN`), HTTPS |
+| Ledgerbot → webhook / plugin | `X-Ledgerbot-Signature` HMAC-SHA256 with a per-subscriber secret, 5-minute window |
+| Channel providers → Ledgerbot | WuzAPI `X-Hmac-Signature`, Meta `X-Hub-Signature-256`, Telegram secret token, e-mail webhook secret |
+| Operators → `/admin` | `LEDGERBOT_ADMIN_TOKEN` |
+
+## Data at rest
+
+- Channel credentials (bot tokens, WABA access tokens, SMTP/IMAP passwords) are encrypted with
+  AES-256-GCM using `LEDGERBOT_SECRET_KEY`.
+- Raw media (photos, PDFs, audio) is stored only as short-lived blobs while being processed;
+  afterwards only structured drafts remain.
+- RAG memory (notes, committed records, document lines) is stored per company in pgvector and is
+  never searched across companies.
+
+## Data deletion
+
+- `POST /v1/deletion-requests` with `{channel, subject}` erases the subject's drafts and redacts
+  audit entries that mention them; `GET /v1/deletion-requests/{id}` shows progress and
+  `deletion.completed` is emitted when done.
+- `POST /webhooks/meta/data-deletion` implements Meta's Data Deletion Request Callback
+  (`signed_request`, verified with `LEDGERBOT_META_APP_SECRET`) and returns the status URL and
+  confirmation code Meta expects.
+
+## What leaves the company
+
+Only messages that the deterministic rules cannot handle, documents that need extraction, and
+voice notes are sent to the configured AI providers, together with the host's system prompt.
+E-invoice XML and bank CSV/Excel files are parsed locally.

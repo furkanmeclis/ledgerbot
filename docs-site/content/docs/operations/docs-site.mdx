@@ -1,0 +1,71 @@
+---
+title: Documentation site
+description: Running this password-protected documentation site as its own container.
+icon: BookOpenText
+---
+
+This site is a Next.js application built with [Fumadocs](https://fumadocs.dev) in `docs-site/`.
+Pages are MDX files under `docs-site/content/docs`; the API reference is generated from
+`docs/contracts/*.openapi.yaml` on every build. It runs as its own Docker image, independent of the
+Ledgerbot services.
+
+## Run it
+
+```bash
+cd docs-site
+cp .env.example .env        # set DOCS_PASSWORD and the environment URLs
+docker compose up -d --build
+# http://localhost:3001
+```
+
+Or with plain Docker (build from the repository root, because the contracts live in `docs/`):
+
+```bash
+docker build -f docs-site/Dockerfile -t ledgerbot-docs .
+docker run -d -p 3001:3000 \
+  -e DOCS_PASSWORD='…' \
+  -e DOCS_PROD_URL=https://ledgerbot.example.com -e DOCS_STAGE_URL=https://stage.ledgerbot.example.com \
+  ledgerbot-docs
+```
+
+## Settings
+
+| Variable | Required | Description |
+|---|---|---|
+| `DOCS_PASSWORD` | yes | The shared password. Without it nobody can sign in. |
+| `DOCS_SESSION_SECRET` | no | Key that signs session cookies. Defaults to a key derived from the password, so changing the password signs everyone out. |
+| `DOCS_SESSION_TTL_HOURS` | no | Session lifetime, default 12 |
+| `DOCS_COOKIE_SECURE` | no | `true`/`false` to force the cookie's Secure flag; by default it follows HTTPS / `X-Forwarded-Proto` |
+| `DOCS_PROD_URL`, `DOCS_STAGE_URL` | no | Ledgerbot API base URLs shown in the docs |
+| `DOCS_PROD_HOST_URL`, `DOCS_STAGE_HOST_URL` | no | Easytrade host contract base URLs shown in the docs |
+| `DOCS_PROD_LABEL`, `DOCS_STAGE_LABEL` | no | Display names (default Production / Staging) |
+| `DOCS_AUTH_DISABLED` | no | `true` turns the password off (local writing only) |
+
+The URL variables are read at request time, so changing them only needs a container restart, not a
+rebuild.
+
+## How the login works
+
+- Every route except `/login`, `/api/auth/login` and `/api/health` requires a session cookie.
+- A correct password sets an HttpOnly, SameSite=Lax cookie containing an expiry and an HMAC-SHA256
+  signature; nothing is stored server-side, so any number of replicas work.
+- Failed attempts are delayed and limited to 10 per client per 10 minutes per process.
+- Pages send `noindex` and `X-Frame-Options: DENY`.
+
+<Callout type="warn" title="The password protects the deployment, not the source">
+  The MDX sources live in the repository. Anyone who can read the repository can read the content,
+  so keep secrets and customer data out of the pages.
+</Callout>
+
+## Writing pages
+
+```bash
+cd docs-site
+npm ci
+DOCS_AUTH_DISABLED=true npm run dev   # http://localhost:3000
+```
+
+Add an `.mdx` file under `content/docs` and list it in the folder's `meta.json`. Components
+available in MDX: `Callout`, `Cards`/`Card`, `Steps`/`Step`, `Tabs`/`Tab`, `TypeTable`,
+`Accordions`, `Files`, and the environment-aware `<BaseUrl />`, `<EnvExports />` and
+`<EnvironmentTable />`.

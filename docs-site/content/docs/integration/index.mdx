@@ -1,0 +1,65 @@
+---
+title: Integration overview
+description: The contracts between Ledgerbot and Easytrade, and which side owns what.
+icon: Network
+---
+
+Ledgerbot is deployed and operated separately from Easytrade. The integration consists of a
+**write path** (how prepared records end up in Easytrade), a **read path** (how Ledgerbot reads
+accounting data), and three small **configuration contracts** (settings, permission matrix,
+identities). Each piece can be adopted on its own.
+
+```text
+                          ┌─────────────────────────── Ledgerbot ───────────────────────────┐
+ WhatsApp / Telegram ───▶ │ api (stateless) ─▶ queue ─▶ worker: understand → permit →        │
+ e-mail / REST /v1        │                                    capability → save mode       │
+                          └────┬──────────────────────┬──────────────────────┬──────────────┘
+                               │ GET settings         │ GET data             │ POST signed webhook
+                               │ GET permissions      │ (read path)          │ (write path, option 1)
+                               ▼                      ▼                      ▼
+                          ┌─────────────────────────── Easytrade ───────────────────────────┐
+                          │ /ledgerbot/companies/{id}/settings | permissions | customers ... │
+                          │ webhook receiver → creates tahsilat / ödeme / gider / sipariş    │
+                          └──────────────────────────────────────────────────────────────────┘
+```
+
+## The contracts
+
+| Contract | Direction | What it carries | Status in Ledgerbot |
+|---|---|---|---|
+| [Settings](/docs/integration/settings) | Easytrade → Ledgerbot (Ledgerbot polls) | Save mode, API key digests, webhooks, alert rules, scheduled reports, **system prompt**, plugins | Implemented (`LEDGERBOT_TENANT_SOURCE=http`) |
+| [Permission matrix](/docs/integration/permissions) | Easytrade → Ledgerbot | Roles → capabilities, users and their phone / chat / e-mail | Implemented |
+| [Identities](/docs/integration/channels#central-numbers-and-identity-routing) | Easytrade → Ledgerbot | Which companies a phone or e-mail belongs to (central WhatsApp number) | Implemented |
+| [Write path](/docs/integration/write-path) | Ledgerbot → Easytrade | Committed records (collections, payments, expenses, orders, bank batches) | Webhooks implemented; see options |
+| [Read path](/docs/integration/read-path) | Ledgerbot → Easytrade | Customers, balances, open/overdue invoices, products and stock, summaries, cash | `fake` and `api` drivers implemented |
+| [Events](/docs/integration/events) | Both | Host events in (`stock.low`, `invoice.overdue` ...), Ledgerbot events out (`draft.*`, `message.handled` ...) | Implemented |
+| [REST API](/docs/api) | Easytrade → Ledgerbot | Run the assistant for a user, approve drafts, manage channels, usage, audit | Implemented |
+
+## What the Easytrade team decides
+
+Ledgerbot is built so that every integration decision stays with the Easytrade team:
+
+1. **How records are written** — receive signed webhooks and create records in Easytrade
+   (recommended), or let Ledgerbot call an Easytrade endpoint. See [Write path](/docs/integration/write-path).
+2. **How data is read** — implement the read endpoints of the host contract, keep the `fake`
+   provider for a pilot, or (planned) give a read-only database view. See [Read path](/docs/integration/read-path).
+3. **Who may do what** — how Easytrade roles (Spatie Permission) map to Ledgerbot roles and
+   capabilities, and the strictest save mode per role.
+4. **What the assistant says** — the company and role prompts in the settings contract.
+
+## Security model in one paragraph
+
+Easytrade calls Ledgerbot with a per-company API key (`lb_<company>_<secret>`) whose SHA-256 digest
+Easytrade itself publishes in the settings contract; Ledgerbot never stores the plaintext. Requests
+can additionally be HMAC-signed. Ledgerbot calls Easytrade with one bearer token
+(`LEDGERBOT_HOST_API_TOKEN`). Every webhook Ledgerbot sends is signed with the subscriber's secret
+(`X-Ledgerbot-Signature`). Channel credentials are encrypted with AES-256-GCM at rest.
+
+## Recommended order
+
+1. Settings + permission matrix (read-only for Easytrade, low risk).
+2. Webhook receiver for `draft.committed` on staging.
+3. Read endpoints, one by one, behind the `api` driver.
+4. Turn on channels for a pilot company.
+
+The detailed checklist is in [Rollout plan](/docs/integration/rollout).

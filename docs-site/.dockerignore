@@ -1,0 +1,8 @@
+node_modules
+.next
+.source
+.env
+.env.*
+!.env.example
+content/docs/reference/ledgerbot-api
+content/docs/reference/host-api

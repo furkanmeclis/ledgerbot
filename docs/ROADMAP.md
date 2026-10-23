@@ -49,6 +49,10 @@ Each item ships as its own pull request with CI green.
 
 ## Next
 
+- **`events` write mode**: committing a draft only marks it and emits `draft.committed`, so the
+  host's webhook receiver is the single writer (write path option 1), while reads keep using the
+  `api` driver. The host can report its own record id back as `external_id`.
+
 - **Multi-step plans with the LLM**: chained commands beyond the rule parser, with a
   bounded tool loop and per-step permission checks.
 

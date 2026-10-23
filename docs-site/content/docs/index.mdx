@@ -1,0 +1,57 @@
+---
+title: Ledgerbot documentation
+description: How the Ledgerbot assistant layer works and how Easytrade integrates with it.
+icon: House
+---
+
+Ledgerbot is an assistant layer that sits **next to** a B2B pre-accounting application such as
+Easytrade. Company users talk to it over WhatsApp, Telegram or e-mail — text, receipt photos,
+PDFs, e-invoice XML, voice notes — and Ledgerbot works out what they want, checks their
+permissions, computes every number in code, and then answers, asks for approval, or records the
+result in the accounting system.
+
+Ledgerbot never reads the Easytrade database and needs no change to the Easytrade codebase to
+start. The two systems meet at a small set of **contracts**, and the Easytrade team decides how
+deep the integration goes.
+
+```text
+ Company users ── WhatsApp · Telegram · e-mail ──▶ Ledgerbot ──▶ answers, drafts, approvals
+                                                       │  ▲
+             settings · permission matrix · data ◀─────┘  │
+                         (read path)                      │
+                                                          │ signed webhooks (write path)
+                                                          ▼
+                                                      Easytrade
+```
+
+## Where to start
+
+<Cards>
+  <Card title="Integration overview" href="/docs/integration" description="The contracts between Ledgerbot and Easytrade, and the decisions the Easytrade team owns." />
+  <Card title="Write path" href="/docs/integration/write-path" description="How records reach Easytrade: signed webhooks (recommended) or calls to the Easytrade API." />
+  <Card title="Read path" href="/docs/integration/read-path" description="How Ledgerbot reads balances, invoices, stock and summaries: the data provider contract." />
+  <Card title="Settings & system prompt" href="/docs/integration/settings" description="The per-company settings endpoint, including the host-provided system prompt." />
+  <Card title="Permission matrix" href="/docs/integration/permissions" description="Mapping Easytrade roles and users onto Ledgerbot capabilities." />
+  <Card title="REST API" href="/docs/api" description="Authentication, signing, idempotency and rate limits of the /v1 API." />
+</Cards>
+
+## Environments
+
+The base URLs below come from the deployment of this documentation site. Pick the environment in
+the sidebar; every example on every page follows it.
+
+<EnvironmentTable />
+
+## Principles
+
+1. **The model understands, code computes.** The language model only returns an intent and raw
+   argument strings. Amounts, VAT, FX, totals and balances are computed in Go from integer kuruş,
+   and capability output is sent to the user verbatim.
+2. **Rules before models.** Common phrasings are matched by deterministic rules in microseconds;
+   the LLM is a fallback. Structured e-invoices never touch a model.
+3. **Contracts, not coupling.** Ledgerbot consumes four contracts (settings, permission matrix,
+   data provider, events) and exposes one REST API.
+4. **Fail safe.** If settings cannot be fetched, the last snapshot is served in degraded mode and
+   nothing is written. Roles can only make the save mode stricter.
+5. **Performance first.** Stateless API replicas, redundant workers, per-company fairness, cached
+   tenant snapshots and batched audit writes. See [Deployment](/docs/operations/deployment).

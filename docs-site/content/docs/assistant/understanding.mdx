@@ -1,0 +1,45 @@
+---
+title: Understanding & AI providers
+description: Rules first, language model as fallback; documents, voice, languages and cost control.
+icon: Brain
+---
+
+## From message to intent
+
+1. **Deterministic rules** (Turkish and English) match common phrasings in about 2.5 µs with no
+   AI cost: collections, payments, balances, stock, reports, approvals, company switching.
+2. **Plugin patterns** (`settings.plugins[].patterns`) are tried next.
+3. **Language model fallback** via a pluggable provider (OpenAI, Anthropic, Ollama, or any
+   OpenAI-compatible API such as Gemini, Groq, OpenRouter). It returns only a capability and raw
+   argument strings; the host's [system prompt](/docs/integration/settings#system-prompt) is
+   appended to the fixed instructions.
+
+Arguments are then parsed in code: Turkish money notation ("5.000,50", "5 bin"), dates, customers
+(through the read path), products and quantities.
+
+## Documents and media
+
+| Input | Handling |
+|---|---|
+| UBL-TR e-invoice XML | Parsed exactly with go-ubltr — no AI |
+| Receipt photo, PDF invoice | Vision model extracts line items; totals and VAT are recomputed and checked in code |
+| Bank statement CSV / Excel | Parsed without AI (header detection, Borç/Alacak, Windows-1254) |
+| Bank statement PDF | Extraction model |
+| Voice note | Speech-to-text provider, then the text pipeline |
+
+Raw media is kept only while it is processed.
+
+## Languages
+
+Replies follow the user's language: Turkish, English or Arabic. Alerts and scheduled reports use
+the company `locale`.
+
+## Providers and cost
+
+- The deployment defines provider profiles in a providers file (`LEDGERBOT_PROVIDERS_FILE`, see
+  `providers.example.json`) with prices per token / audio minute.
+- A company can choose profiles per purpose (`settings.providers.agent | extraction | stt`).
+- `settings.ai_daily_limit` caps AI calls per company per day.
+- `GET /v1/usage` reports calls, tokens and cost per purpose, provider and model, plus today's
+  quota.
+- With no providers file, offline fake providers are used (development and tests).

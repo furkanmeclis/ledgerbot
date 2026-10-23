@@ -14,6 +14,9 @@ info:
     **thousandths** of a unit (1000 = 1 piece).
 servers:
   - url: https://host.example/ledgerbot
+tags:
+  - { name: Tenant contracts, description: "Settings, permission matrix and identity routing" }
+  - { name: Data provider, description: "Read and write endpoints used by LEDGERBOT_DATA_DRIVER=api" }
 security:
   - token: []
 components:
@@ -23,6 +26,8 @@ paths:
   # ---------------------------------------------------------------- tenant contracts
   /companies/{company}/settings:
     get:
+      tags: [Tenant contracts]
+      operationId: getCompanySettings
       summary: Company settings (save mode, providers, API keys, webhooks, rules, prompts)
       parameters: [{ name: company, in: path, required: true, schema: { type: string } }]
       responses:
@@ -30,6 +35,8 @@ paths:
         '404': { description: Unknown company }
   /companies/{company}/permissions:
     get:
+      tags: [Tenant contracts]
+      operationId: getPermissionMatrix
       summary: Permission matrix (roles, capabilities, users and their channel addresses)
       parameters: [{ name: company, in: path, required: true, schema: { type: string } }]
       responses:
@@ -37,6 +44,8 @@ paths:
         '404': { description: Unknown company }
   /companies:
     get:
+      tags: [Tenant contracts]
+      operationId: listCompanies
       summary: List company ids (scheduled reports, simulator)
       responses:
         '200':
@@ -44,6 +53,8 @@ paths:
           content: { application/json: { schema: { type: object, properties: { companies: { type: array, items: { type: string } } } } } }
   /identities:
     get:
+      tags: [Tenant contracts]
+      operationId: resolveIdentity
       summary: Route a channel address to companies (central WhatsApp number / shared bot)
       parameters:
         - { name: channel, in: query, required: true, schema: { type: string, enum: [wuzapi, waba, telegram, email] } }
@@ -56,6 +67,8 @@ paths:
   # ---------------------------------------------------------------- data provider (apidriver)
   /companies/{company}/customers:
     get:
+      tags: [Data provider]
+      operationId: searchCustomers
       summary: Search customers (cari)
       parameters:
         - { name: company, in: path, required: true, schema: { type: string } }
@@ -71,6 +84,8 @@ paths:
                 items: { type: object, properties: { id: { type: string }, name: { type: string }, phone: { type: string }, email: { type: string } } }
   /companies/{company}/customers/{id}/balance:
     get:
+      tags: [Data provider]
+      operationId: getCustomerBalance
       summary: Customer balance (positive = customer owes)
       parameters:
         - { name: company, in: path, required: true, schema: { type: string } }
@@ -83,6 +98,8 @@ paths:
               schema: { type: object, properties: { customer_id: { type: string }, balance: { type: integer }, overdue: { type: integer }, as_of: { type: string, format: date-time } } }
   /companies/{company}/customers/{id}/invoices/open:
     get:
+      tags: [Data provider]
+      operationId: listOpenInvoices
       summary: A customer's unpaid invoices (used to match collections)
       parameters:
         - { name: company, in: path, required: true, schema: { type: string } }
@@ -97,6 +114,8 @@ paths:
                 items: { type: object, properties: { customer_id: { type: string }, invoice_no: { type: string }, amount: { type: integer }, due_date: { type: string, format: date } } }
   /companies/{company}/receivables/overdue:
     get:
+      tags: [Data provider]
+      operationId: listOverdue
       summary: Overdue invoices
       parameters:
         - { name: company, in: path, required: true, schema: { type: string } }
@@ -111,6 +130,8 @@ paths:
                 items: { type: object, properties: { customer_id: { type: string }, customer_name: { type: string }, invoice_no: { type: string }, amount: { type: integer }, due_date: { type: string, format: date } } }
   /companies/{company}/products:
     get:
+      tags: [Data provider]
+      operationId: searchProducts
       summary: Search products with current stock
       parameters:
         - { name: company, in: path, required: true, schema: { type: string } }
@@ -136,6 +157,8 @@ paths:
                     min_stock: { type: integer }
   /companies/{company}/summary:
     get:
+      tags: [Data provider]
+      operationId: getSummary
       summary: Daily (`day`) or period (`from`, `to` exclusive) summary
       parameters:
         - { name: company, in: path, required: true, schema: { type: string } }
@@ -150,12 +173,16 @@ paths:
               schema: { type: object, properties: { day: { type: string }, sales: { type: integer }, collections: { type: integer }, payments: { type: integer }, expenses: { type: integer }, output_vat: { type: integer }, input_vat: { type: integer }, orders: { type: integer } } }
   /companies/{company}/cash:
     get:
+      tags: [Data provider]
+      operationId: getCashPosition
       summary: Current cash and bank balance
       parameters: [{ name: company, in: path, required: true, schema: { type: string } }]
       responses:
         '200': { description: Balance, content: { application/json: { schema: { type: object, properties: { balance: { type: integer } } } } } }
   /companies/{company}/cash/upcoming:
     get:
+      tags: [Data provider]
+      operationId: listUpcomingCash
       summary: Expected cash movements (receivables positive, payables negative) until a date
       parameters:
         - { name: company, in: path, required: true, schema: { type: string } }
@@ -170,6 +197,8 @@ paths:
                 items: { type: object, properties: { date: { type: string, format: date }, amount: { type: integer }, description: { type: string } } }
   /companies/{company}/records:
     post:
+      tags: [Data provider]
+      operationId: commitRecord
       summary: Commit a record (collection, payment, expense, order)
       description: Must be idempotent on `draft_id` (also sent as the Idempotency-Key header).
       parameters: [{ name: company, in: path, required: true, schema: { type: string } }]
