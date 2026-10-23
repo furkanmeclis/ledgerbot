@@ -1,0 +1,113 @@
+---
+title: Deploying on Dokploy
+description: The whole stack (API, workers, PostgreSQL, demo console, docs, observability, WuzAPI) as one Dokploy compose service.
+icon: Rocket
+---
+
+`deploy/dokploy/compose.yml` runs everything as a single Dokploy **Docker Compose** service. Optional
+parts are compose profiles, switched on with `COMPOSE_PROFILES`. Nothing publishes a host port;
+Traefik (Dokploy's proxy) reaches the services over the project network.
+
+| Profile | Services | Domain → port |
+|---|---|---|
+| (always) | `postgres`, `migrate`, `api` × `API_REPLICAS`, `worker` × `WORKER_REPLICAS` | `api` → 8080 |
+| `demo` | `dashboard` (demo console) | `dashboard` → 3000 |
+| `docs` | `docs` (this site) | `docs` → 3000 |
+| `observability` | `prometheus`, `grafana`, `jaeger` | `grafana` → 3000 |
+| `whatsapp` | `wuzapi` | none needed (Ledgerbot reaches it as `http://wuzapi:8080`) |
+
+## Sizing
+
+| Server | What fits |
+|---|---|
+| 2 GB | Not supported. With default settings the heavy test suite saw 42 OOM kills and ~20 % errors. |
+| 4 GB + 4 GB swap | Core + `demo` + `docs` with the values in `env.example` (10 DB connections per process, 32 worker concurrency). |
+| 8 GB, 4 vCPU | Every profile. Raise `PG_MEM_LIMIT=2g`, `PG_SHARED_BUFFERS=512MB`, `LEDGERBOT_DB_MAX_CONNS=20`, `LEDGERBOT_WORKER_CONCURRENCY=64`, API/worker limits to `512m`. |
+
+Keep `(API_REPLICAS + WORKER_REPLICAS) × LEDGERBOT_DB_MAX_CONNS + 10` below `PG_MAX_CONNECTIONS`.
+Builds (Go, Next.js) run on the server, so swap matters on small machines.
+
+## Steps
+
+<Steps>
+<Step>
+### DNS first
+
+Point the A records (`api`, `demo`, `docs`, `grafana`) at the server **before** adding domains in
+Dokploy, or Let's Encrypt cannot issue certificates.
+</Step>
+<Step>
+### Create the compose service
+
+Create Service → Compose, type **Docker Compose** (not Stack). Repository `furkanmeclis/ledgerbot`,
+branch `main`, compose path `./deploy/dokploy/compose.yml`. Turn on **Advanced → Isolated
+Deployment** so service names such as `postgres` and `api` cannot collide with other projects.
+</Step>
+<Step>
+### Environment
+
+Paste `deploy/dokploy/env.example` into the Environment tab and fill in the secrets
+(`openssl rand -hex 32`). Start with `COMPOSE_PROFILES=` empty, deploy, and check that `migrate`
+exited 0 and every `api` and `worker` container is healthy.
+
+<Callout type="warn" title="POSTGRES_PASSWORD is fixed at first boot">
+  PostgreSQL stores the password in its volume on the first start. Changing the variable later does
+  not change the database password; change it with `ALTER USER` first.
+</Callout>
+</Step>
+<Step>
+### Domains
+
+Add the domains with HTTPS and the Let's Encrypt certificate, then **redeploy** (compose domains are
+Traefik labels and only apply on deploy). Set `API_DOMAIN` and `LEDGERBOT_PUBLIC_URL` to the API
+domain: channel webhook URLs are built from it, and `/metrics` answers 403 on that domain.
+
+```bash
+curl -fsS https://api.example.com/readyz
+curl -s -o /dev/null -w '%{http_code}\n' https://api.example.com/metrics   # 403
+BASE_URL=https://api.example.com ./scripts/smoke.sh                         # needs LEDGERBOT_DEV=true
+```
+</Step>
+<Step>
+### Optional parts
+
+Add profiles one at a time (`demo`, then `docs`, `observability`, `whatsapp`) and redeploy after
+each. Grafana comes with Prometheus and Jaeger data sources; Prometheus discovers every `api` and
+`worker` replica through Docker DNS.
+</Step>
+</Steps>
+
+## Environment-only extras
+
+| Variable | Use |
+|---|---|
+| `LEDGERBOT_PROVIDERS_JSON` + `LEDGERBOT_PROVIDERS_FILE=/app/config/providers.json` | Real AI providers: a minified `providers.json` on one line in single quotes |
+| `LEDGERBOT_COMPANY_FILE=<id>.json` + `LEDGERBOT_COMPANY_JSON` | One extra company next to the demo seed (your own phone number, your own API key) |
+| `TRAEFIK_PREFIX` | Unique per Ledgerbot instance on the same server (e.g. `ledgerbot-stage`) |
+
+## WhatsApp through WuzAPI
+
+1. Create the connection in Ledgerbot (`POST /v1/channels`, kind `wuzapi`,
+   `config: {base_url: "http://wuzapi:8080", token, hmac_key}`).
+2. Create the WuzAPI user with the same token and HMAC key and the **internal** webhook
+   `http://api:8080/webhooks/wuzapi/{connection id}` (Dokploy terminal on the `wuzapi` container:
+   `curl -H "Authorization: $WUZAPI_ADMIN_TOKEN" localhost:8080/admin/users -d …`).
+3. `POST /v1/channels/{id}/connect`, then open the data URL from `GET /v1/channels/{id}/qr` and scan
+   it from WhatsApp → Linked devices.
+
+## Backups
+
+Add a compose **Schedule** on the `postgres` service:
+
+```bash
+sh -c 'pg_dump -U ledgerbot -Fc ledgerbot > /backup/ledgerbot-$(date +%F).dump && find /backup -name "*.dump" -mtime +7 -delete'
+```
+
+then a **Volume Backup** of the `pgbackup` volume to S3. The dumps are complete files, so the
+database keeps running during the upload.
+
+<Callout type="info" title="Demo server vs production">
+  The console needs `LEDGERBOT_DEV=true`, and the demo API keys are public in the repository. Treat
+  such a server as a demo. Production is a separate compose service (or Dokploy environment) with
+  `LEDGERBOT_DEV=false`, `LEDGERBOT_TENANT_SOURCE=http`, no `demo` profile, and its own `TRAEFIK_PREFIX`.
+</Callout>

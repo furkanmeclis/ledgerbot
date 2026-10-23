@@ -1,1 +1,1 @@
-{ "pages": ["deployment", "configuration", "observability", "security", "docs-site"] }
+{ "pages": ["deployment", "dokploy", "configuration", "observability", "security", "docs-site"] }

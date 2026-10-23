@@ -1,0 +1,261 @@
+# ledgerbot on Dokploy: one "Docker Compose" service for the whole stack.
+#
+#   Dokploy → Create Service → Compose (type: Docker Compose, not Stack)
+#     Provider: GitHub/Git, repository furkanmeclis/ledgerbot, branch main
+#     Compose path: ./deploy/dokploy/compose.yml
+#     Advanced → Isolated Deployment: on
+#   Environment tab: paste deploy/dokploy/env.example and fill it in.
+#   Domains tab: api → 8080, dashboard → 3000, docs → 3000, grafana → 3000, wuzapi → 8080.
+#
+# Optional parts are compose profiles, switched on with COMPOSE_PROFILES in the
+# environment: demo (console), docs (documentation site), observability
+# (Prometheus, Grafana, Jaeger), whatsapp (WuzAPI). Nothing publishes a host
+# port: Traefik reaches the services over the project network.
+name: ledgerbot
+
+x-app: &app
+  build:
+    context: ../..
+  image: ledgerbot:dokploy
+  env_file:
+    - path: .env
+      required: false
+  environment: &appenv
+    LEDGERBOT_DATABASE_URL: postgres://ledgerbot:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/ledgerbot?sslmode=disable
+  depends_on:
+    migrate:
+      condition: service_completed_successfully
+  configs:
+    - source: providers
+      target: /app/config/providers.json
+    # One extra company next to the demo seed: LEDGERBOT_COMPANY_FILE=<id>.json
+    # and LEDGERBOT_COMPANY_JSON='{"settings":…,"permissions":…}' (one line).
+    - source: company
+      target: /app/seed/companies/${LEDGERBOT_COMPANY_FILE:-.none}
+  restart: unless-stopped
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_USER: ledgerbot
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: ledgerbot
+    command:
+      - postgres
+      - -c
+      - max_connections=${PG_MAX_CONNECTIONS:-300}
+      - -c
+      - shared_buffers=${PG_SHARED_BUFFERS:-256MB}
+      - -c
+      - effective_cache_size=${PG_EFFECTIVE_CACHE_SIZE:-768MB}
+      - -c
+      - work_mem=4MB
+      - -c
+      - synchronous_commit=off
+    shm_size: 256m
+    mem_limit: ${PG_MEM_LIMIT:-1g}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - pgbackup:/backup
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U ledgerbot -d ledgerbot"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  migrate:
+    build:
+      context: ../..
+    image: ledgerbot:dokploy
+    environment:
+      <<: *appenv
+      LEDGERBOT_DEV: "true"
+    command: ["migrate"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    <<: *app
+    command: ["api"]
+    environment:
+      <<: *appenv
+      GOMEMLIMIT: ${API_GOMEMLIMIT:-320MiB}
+    mem_limit: ${API_MEM_LIMIT:-384m}
+    deploy:
+      replicas: ${API_REPLICAS:-2}
+    expose: ["8080"]
+    healthcheck:
+      test: ["CMD", "/app/ledgerbot", "healthcheck"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    labels:
+      # /metrics stays inside the project network (Prometheus scrapes it there);
+      # from the internet it answers 403. Needs API_DOMAIN = the api domain.
+      - traefik.enable=true
+      - traefik.http.middlewares.${TRAEFIK_PREFIX:-ledgerbot}-internal.ipallowlist.sourcerange=127.0.0.1/32
+      - traefik.http.routers.${TRAEFIK_PREFIX:-ledgerbot}-metrics.rule=Host(`${API_DOMAIN:-api.invalid}`) && PathPrefix(`/metrics`)
+      - traefik.http.routers.${TRAEFIK_PREFIX:-ledgerbot}-metrics.entrypoints=websecure
+      - traefik.http.routers.${TRAEFIK_PREFIX:-ledgerbot}-metrics.tls.certresolver=letsencrypt
+      - traefik.http.routers.${TRAEFIK_PREFIX:-ledgerbot}-metrics.priority=1000
+      - traefik.http.routers.${TRAEFIK_PREFIX:-ledgerbot}-metrics.middlewares=${TRAEFIK_PREFIX:-ledgerbot}-internal
+      - traefik.http.routers.${TRAEFIK_PREFIX:-ledgerbot}-metrics.service=${TRAEFIK_PREFIX:-ledgerbot}-metrics
+      - traefik.http.services.${TRAEFIK_PREFIX:-ledgerbot}-metrics.loadbalancer.server.port=8080
+
+  worker:
+    <<: *app
+    command: ["worker"]
+    environment:
+      <<: *appenv
+      GOMEMLIMIT: ${WORKER_GOMEMLIMIT:-320MiB}
+    mem_limit: ${WORKER_MEM_LIMIT:-384m}
+    deploy:
+      replicas: ${WORKER_REPLICAS:-3}
+    healthcheck:
+      test: ["CMD", "/app/ledgerbot", "healthcheck"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  # --- profile: demo ---------------------------------------------------------
+  dashboard:
+    profiles: ["demo"]
+    build:
+      context: ../../dashboard
+    image: ledgerbot-dashboard:dokploy
+    environment:
+      LEDGERBOT_URL: http://api:8080
+      DATABASE_URL: postgres://ledgerbot:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/ledgerbot
+      DEMO_COMPANIES: ${DEMO_COMPANIES:-demo:lb_demo_demosecret0000000000000000,demo2:lb_demo2_demosecret0000000000000000}
+    mem_limit: ${DASHBOARD_MEM_LIMIT:-256m}
+    expose: ["3000"]
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # --- profile: docs ---------------------------------------------------------
+  docs:
+    profiles: ["docs"]
+    build:
+      context: ../../docs-site
+      additional_contexts:
+        contracts: ../../docs/contracts
+    image: ledgerbot-docs:dokploy
+    environment:
+      DOCS_PASSWORD: ${DOCS_PASSWORD:-}
+      DOCS_SESSION_SECRET: ${DOCS_SESSION_SECRET:-}
+      DOCS_SESSION_TTL_HOURS: ${DOCS_SESSION_TTL_HOURS:-12}
+      DOCS_COOKIE_SECURE: ${DOCS_COOKIE_SECURE:-}
+      DOCS_PROD_URL: ${DOCS_PROD_URL:-}
+      DOCS_STAGE_URL: ${DOCS_STAGE_URL:-}
+      DOCS_PROD_HOST_URL: ${DOCS_PROD_HOST_URL:-}
+      DOCS_STAGE_HOST_URL: ${DOCS_STAGE_HOST_URL:-}
+      DOCS_PROD_LABEL: ${DOCS_PROD_LABEL:-Production}
+      DOCS_STAGE_LABEL: ${DOCS_STAGE_LABEL:-Staging}
+    mem_limit: ${DOCS_MEM_LIMIT:-256m}
+    expose: ["3000"]
+    restart: unless-stopped
+
+  # --- profile: observability ------------------------------------------------
+  prometheus:
+    profiles: ["observability"]
+    image: prom/prometheus:v3.5.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=${PROMETHEUS_RETENTION:-15d}
+    configs:
+      - source: prometheus
+        target: /etc/prometheus/prometheus.yml
+    volumes:
+      - promdata:/prometheus
+    mem_limit: ${PROMETHEUS_MEM_LIMIT:-512m}
+    expose: ["9090"]
+    restart: unless-stopped
+
+  grafana:
+    profiles: ["observability"]
+    image: grafana/grafana:12.1.0
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-}
+      GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:-}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+    configs:
+      - source: grafana-datasources
+        target: /etc/grafana/provisioning/datasources/ledgerbot.yml
+    volumes:
+      - grafanadata:/var/lib/grafana
+    mem_limit: ${GRAFANA_MEM_LIMIT:-256m}
+    expose: ["3000"]
+    depends_on: [prometheus]
+    restart: unless-stopped
+
+  jaeger:
+    profiles: ["observability"]
+    image: jaegertracing/jaeger:2.10.0
+    mem_limit: ${JAEGER_MEM_LIMIT:-512m}
+    expose: ["16686", "4318"]
+    restart: unless-stopped
+
+  # --- profile: whatsapp -----------------------------------------------------
+  wuzapi:
+    profiles: ["whatsapp"]
+    image: asternic/wuzapi:1.0.9
+    environment:
+      WUZAPI_ADMIN_TOKEN: ${WUZAPI_ADMIN_TOKEN:-}
+      WUZAPI_GLOBAL_ENCRYPTION_KEY: ${WUZAPI_GLOBAL_ENCRYPTION_KEY:-}
+      WUZAPI_GLOBAL_HMAC_KEY: ${WUZAPI_GLOBAL_HMAC_KEY:-}
+      WEBHOOK_FORMAT: json
+      SESSION_DEVICE_NAME: ${WUZAPI_DEVICE_NAME:-Ledgerbot}
+      TZ: Europe/Istanbul
+    volumes:
+      - wuzapidata:/app/dbdata
+    mem_limit: ${WUZAPI_MEM_LIMIT:-384m}
+    expose: ["8080"]
+    restart: unless-stopped
+
+configs:
+  # Paste a minified providers.json into LEDGERBOT_PROVIDERS_JSON and set
+  # LEDGERBOT_PROVIDERS_FILE=/app/config/providers.json to use real AI providers.
+  providers:
+    content: ${LEDGERBOT_PROVIDERS_JSON:-unused}
+  company:
+    content: ${LEDGERBOT_COMPANY_JSON:-unused}
+  prometheus:
+    content: |
+      global:
+        scrape_interval: 15s
+      scrape_configs:
+        - job_name: ledgerbot-api
+          dns_sd_configs: [{ names: [api], type: A, port: 8080 }]
+        - job_name: ledgerbot-worker
+          dns_sd_configs: [{ names: [worker], type: A, port: 8080 }]
+        - job_name: prometheus
+          static_configs: [{ targets: ["localhost:9090"] }]
+  grafana-datasources:
+    content: |
+      apiVersion: 1
+      datasources:
+        - name: Prometheus
+          type: prometheus
+          access: proxy
+          url: http://prometheus:9090
+          isDefault: true
+        - name: Jaeger
+          type: jaeger
+          access: proxy
+          url: http://jaeger:16686
+
+volumes:
+  pgdata:
+  pgbackup:
+  promdata:
+  grafanadata:
+  wuzapidata:

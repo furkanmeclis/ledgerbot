@@ -3,6 +3,7 @@ package telemetry
 import (
 	"context"
 	"testing"
+	"time"
 
 	"go.opentelemetry.io/otel/trace"
 )
@@ -29,4 +30,15 @@ func TestSetupNoopAndPropagation(t *testing.T) {
 	if Inject(context.Background()) != nil {
 		t.Fatal("empty context must inject nothing")
 	}
+}
+
+func TestSetupWithExporter(t *testing.T) {
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://127.0.0.1:4318")
+	shutdown, err := Setup(context.Background(), "test", "dev")
+	if err != nil {
+		t.Fatalf("tracing setup with an endpoint: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_ = shutdown(ctx) // nothing listens on the endpoint; only setup matters here
 }
