@@ -72,8 +72,11 @@ BASE_URL=https://api.example.com ./scripts/smoke.sh                         # ne
 ### Optional parts
 
 Add profiles one at a time (`demo`, then `docs`, `observability`, `whatsapp`) and redeploy after
-each. Grafana comes with Prometheus and Jaeger data sources; Prometheus discovers every `api` and
-`worker` replica through Docker DNS.
+each. Grafana comes with Prometheus and Jaeger data sources and a **Ledgerbot** dashboard (folder
+Ledgerbot: API traffic and errors, assistant latency, queue, AI calls and tokens, process memory).
+The dashboard is built into the Grafana image, so edit
+`deploy/dokploy/grafana/dashboards/ledgerbot.json` in the repository rather than in the UI.
+Prometheus discovers every `api` and `worker` replica through Docker DNS.
 </Step>
 </Steps>
 

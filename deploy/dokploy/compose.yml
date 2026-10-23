@@ -180,16 +180,15 @@ services:
 
   grafana:
     profiles: ["observability"]
-    image: grafana/grafana:12.1.0
+    build:
+      context: ./grafana
+    image: ledgerbot-grafana:dokploy
     environment:
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-}
       GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:-}
       GF_USERS_ALLOW_SIGN_UP: "false"
       GF_ANALYTICS_REPORTING_ENABLED: "false"
-    configs:
-      - source: grafana-datasources
-        target: /etc/grafana/provisioning/datasources/ledgerbot.yml
     volumes:
       - grafanadata:/var/lib/grafana
     mem_limit: ${GRAFANA_MEM_LIMIT:-256m}
@@ -239,19 +238,6 @@ configs:
           dns_sd_configs: [{ names: [worker], type: A, port: 8080 }]
         - job_name: prometheus
           static_configs: [{ targets: ["localhost:9090"] }]
-  grafana-datasources:
-    content: |
-      apiVersion: 1
-      datasources:
-        - name: Prometheus
-          type: prometheus
-          access: proxy
-          url: http://prometheus:9090
-          isDefault: true
-        - name: Jaeger
-          type: jaeger
-          access: proxy
-          url: http://jaeger:16686
 
 volumes:
   pgdata:
