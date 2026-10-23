@@ -1,0 +1,106 @@
+---
+title: REST API basics
+description: Authentication, scopes, request signing, idempotency, rate limits, errors and pagination.
+icon: KeyRound
+---
+
+The `/v1` API lets Easytrade run the assistant for a user, approve drafts, push events, manage
+channels and read usage and audit data. Base URL for the selected environment: <BaseUrl />
+
+<EnvExports />
+
+## Response envelope
+
+```json
+{ "data": { ... } }
+{ "error": { "code": "unknown_actor", "message": "actor_id is not in the permission matrix" } }
+```
+
+| Status | `error.code` examples | Meaning |
+|---|---|---|
+| 400 | `bad_request` | Malformed JSON or missing field |
+| 401 | `unauthorized`, `bad_signature` | Missing/invalid key or signature |
+| 403 | `forbidden` | Key lacks the scope |
+| 404 | `not_found` | Unknown draft, channel … |
+| 409 | `conflict` | Draft not pending, not permitted, or settings degraded |
+| 422 | `unknown_actor`, `idempotency_mismatch` | Actor not in the matrix, or an idempotency key reused with another body |
+| 500 | `store_error`, `handle_failed`, `enqueue_failed` | Server-side failure; safe to retry with the same idempotency key |
+| 429 | `rate_limited` | Per-company token bucket exhausted |
+| 503 | `settings_unavailable` | Settings could not be loaded and no snapshot exists |
+
+## Authentication
+
+```http
+Authorization: Bearer lb_<company>_<secret>
+```
+
+The key embeds the company id. Ledgerbot hashes the presented key with SHA-256 and compares it, in
+constant time, to the digests in the company's `settings.api_keys`. **Easytrade generates the keys
+and only publishes their digests**; Ledgerbot never sees or stores a plaintext key.
+
+```php
+// Easytrade: issue a key for company "demo"
+$key = 'lb_demo_'.bin2hex(random_bytes(24));
+$digest = hash('sha256', $key);           // publish in settings.api_keys[].sha256
+// store $key encrypted for Easytrade's own backend calls; show it once if it is for a person
+```
+
+### Scopes
+
+| Scope | Endpoints |
+|---|---|
+| `messages` | `POST /v1/messages`, `POST /v1/messages/send` |
+| `drafts` | `GET /v1/drafts`, `GET /v1/drafts/{id}`, approve, reject |
+| `events` | `POST /v1/events` |
+| `channels` | `/v1/channels/*` |
+| `usage` | `GET /v1/usage` |
+| `audit` | `GET /v1/audit` |
+| `deletion` | `/v1/deletion-requests` |
+| `settings` | `GET /v1/settings` |
+| `dev` | `/v1/dev/*`, `/v1/simulator/run` (only with `LEDGERBOT_DEV=true`) |
+| `*` | Everything |
+
+`GET /v1/capabilities` only needs a valid key.
+
+## Request signing (optional)
+
+When `settings.signing_secret` is set, every `/v1` request must also carry:
+
+```http
+X-Ledgerbot-Signature: t=<unix seconds>,v1=<hex HMAC-SHA256(signing_secret, t + "." + raw body)>
+```
+
+The timestamp must be within ±5 minutes. This is the same scheme Ledgerbot uses for outbound
+webhooks, so one helper serves both directions:
+
+```php
+function ledgerbotSign(string $secret, string $body): string {
+    $t = time();
+    return 't='.$t.',v1='.hash_hmac('sha256', $t.'.'.$body, $secret);
+}
+```
+
+## Idempotency
+
+`POST` requests accept `Idempotency-Key` (max 200 characters). A repeated key replays the stored
+response for 24 hours with `Idempotent-Replayed: true`; the same key with a different body returns
+`422`. Use a natural key: the Easytrade record id plus the action.
+
+## Rate limits
+
+Each company has a token bucket per API replica: `LEDGERBOT_RATE_RPS` (default 20 requests/s) with
+burst `LEDGERBOT_RATE_BURST` (default 40). With N replicas behind the gateway the effective limit
+is about N × RPS. Exceeding it returns `429`.
+
+## Pagination
+
+- Drafts: keyset pagination. Pass `next_before` from the previous page as `before`; `limit` ≤ 200.
+- Audit: pass the smallest id you have as `before_id`; `limit` ≤ 500.
+
+## Sync vs async
+
+`POST /v1/messages` answers synchronously with the reply by default. With `"async": true` it
+returns `202` immediately and the result is delivered through webhooks (`draft.*`,
+`message.handled`). Use async for media and bank statements.
+
+The complete endpoint list is in the [Ledgerbot API reference](/docs/reference/ledgerbot-api).

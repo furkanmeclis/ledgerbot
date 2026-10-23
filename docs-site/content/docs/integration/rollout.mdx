@@ -1,0 +1,92 @@
+---
+title: Rollout plan
+description: A step-by-step plan from a sandbox to a production pilot, with what each side does.
+icon: ListChecks
+---
+
+Each step is independently useful and reversible. Easytrade code changes are isolated in a
+`ledgerbot` route group, a webhook receiver and a settings tab.
+
+<Steps>
+<Step>
+
+### 0. Sandbox (no Easytrade changes)
+
+- Run Ledgerbot locally or on staging with `LEDGERBOT_TENANT_SOURCE=file` and
+  `LEDGERBOT_DATA_DRIVER=fake` ([quickstart](/docs/getting-started/quickstart)).
+- Try the dev channel and the demo console; agree on the capability list and save modes.
+
+</Step>
+<Step>
+
+### 1. Settings and permission matrix
+
+**Easytrade:** implement `GET /ledgerbot/companies/{company}/settings` and `.../permissions`
+(and `GET /ledgerbot/companies` for scheduled reports) behind a bearer token. Generate API keys
+for its own backend and publish their SHA-256 digests in `api_keys`.
+
+**Ledgerbot:** `LEDGERBOT_TENANT_SOURCE=http`, `LEDGERBOT_HOST_API_URL`, `LEDGERBOT_HOST_API_TOKEN`.
+
+**Check:** `GET /v1/settings` with the new key shows the company, roles and users.
+
+</Step>
+<Step>
+
+### 2. Webhook receiver on staging
+
+**Easytrade:** add the receiver from [Receiving webhooks](/docs/integration/receiving-webhooks),
+subscribe it to `draft.committed` (+ `draft.rejected`, `anomaly.detected`) in the settings.
+
+**Check:** a collection approved through `POST /v1/messages` + `POST /v1/drafts/{id}/approve`
+on staging creates exactly one tahsilat, also when the delivery is replayed.
+
+</Step>
+<Step>
+
+### 3. Read endpoints
+
+**Easytrade:** implement the [read endpoints](/docs/integration/read-path#phase-2-the-host-api-api-driver)
+one by one: customers → balance → open invoices → overdue → products → summary → cash.
+
+**Ledgerbot:** `LEDGERBOT_DATA_DRIVER=api` on staging once all are available.
+
+**Check:** balances and stock in assistant replies match the Easytrade screens.
+
+</Step>
+<Step>
+
+### 4. Events
+
+**Easytrade:** emit `stock.low`, `invoice.overdue`, `payment.received` and `settings.changed` to
+`POST /v1/events`. Configure `rules` and `reports` in the settings.
+
+</Step>
+<Step>
+
+### 5. Pilot company
+
+- Connect one channel (a WuzAPI number or a Telegram bot) for one company.
+- Save mode `ask_approval` for everyone; `ai_daily_limit` set.
+- Watch `GET /v1/audit`, `GET /v1/usage` and the Prometheus metrics for a week.
+
+</Step>
+<Step>
+
+### 6. Production
+
+- Production URLs and secrets ([Deployment](/docs/operations/deployment)).
+- Enable more companies; loosen save modes per role where the pilot showed it is safe.
+
+</Step>
+</Steps>
+
+## Responsibility summary
+
+| Item | Easytrade | Ledgerbot |
+|---|---|---|
+| Accounting data and records | Owns, validates, writes | Never writes directly; prepares records |
+| Users, roles, phone numbers | Source of truth; serves the matrix | Enforces it on every message |
+| Assistant tone and context | Serves `prompts` | Appends them to fixed instructions |
+| AI providers and cost | Optional per-company choice | Calls providers, tracks cost and quota |
+| Channel numbers / bots | Decides which to use | Connects, receives, replies |
+| Hosting | — | Runs api, workers, PostgreSQL |

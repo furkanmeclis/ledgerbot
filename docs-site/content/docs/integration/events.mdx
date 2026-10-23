@@ -1,0 +1,100 @@
+---
+title: Events
+description: One envelope for host events coming in and Ledgerbot events going out.
+icon: Radio
+---
+
+Ledgerbot uses a single event envelope in both directions:
+
+- **Inbound** — Easytrade (or the simulator) tells Ledgerbot that something happened:
+  `POST /v1/events`. Events drive [proactive alerts](/docs/integration/settings#rules-proactive-alerts)
+  and are fanned out to webhooks.
+- **Outbound** — Ledgerbot tells Easytrade what it did, through signed
+  [webhooks](/docs/integration/write-path#option-1--signed-webhooks).
+
+## Envelope
+
+```json
+{
+  "id": "evt_5b0c8f2d6a4e4a1b9f3e2d1c0b9a8f7e",
+  "type": "stock.low",
+  "company_id": "demo",
+  "source": "host",
+  "occurred_at": "2026-10-23T08:00:00Z",
+  "data": { "product_id": "P-204", "name": "A4 Fotokopi Kağıdı", "unit": "koli", "stock": 3000, "min_stock": 10000 }
+}
+```
+
+<TypeTable
+  type={{
+    id: { type: 'string', description: 'Unique id. Generated (evt_…) when the host omits it. Use it to de-duplicate.', required: true },
+    type: { type: 'string', description: 'Event type, see the tables below.', required: true },
+    company_id: { type: 'string', description: 'Set by Ledgerbot from the API key on inbound events.', required: true },
+    source: { type: '"host" | "simulator" | "ledgerbot"', description: 'Who produced the event.' },
+    occurred_at: { type: 'string (date-time)', description: 'Defaults to the time Ledgerbot received it.', required: true },
+    data: { type: 'object', description: 'Type-specific payload.', required: true },
+  }}
+/>
+
+## Inbound events (Easytrade → Ledgerbot)
+
+```bash
+curl -s "$LEDGERBOT_URL/v1/events" -H "Authorization: Bearer $LEDGERBOT_KEY" \
+  -H "Idempotency-Key: inv-overdue-EAS2026000000123-2026-10-23" -d '{
+  "type": "invoice.overdue",
+  "data": { "customer_id": "C-1001", "customer_name": "Ahmet Yılmaz", "invoice_no": "EAS2026000000123", "amount": 350000, "due_date": "2026-10-20" }
+}'
+# → 202 {"data":{"id":"evt_…","status":"queued"}}
+```
+
+| Type | `data` | Effect |
+|---|---|---|
+| `stock.low` | `product_id`, `name`, `unit?`, `stock`, `min_stock` (thousandths) | Alert to roles in matching rules (throttled per product) |
+| `invoice.overdue` | `customer_id`, `customer_name?`, `invoice_no`, `amount` (kuruş), `due_date` | Alert (throttled per invoice) |
+| `payment.received` | `customer_id`, `amount`, `reference?` | Alert |
+| `order.created` | free-form | Webhook fan-out |
+| `settings.changed` | `{}` | Drops the cached settings and permission matrix |
+
+Requires the API key scope `events`. Send them from Easytrade observers or scheduled commands
+(for example a nightly job that emits `invoice.overdue` for invoices that just became overdue).
+
+## Outbound events (Ledgerbot → Easytrade)
+
+Only delivered if a webhook in the company settings subscribes to the type.
+
+| Type | `data` | When |
+|---|---|---|
+| `draft.created` | Draft (status `preview` or `pending`) | A write capability prepared a record |
+| `draft.committed` | Draft (status `committed`, `external_id`, `payload` = record) | The draft was committed — **the write path event** |
+| `draft.rejected` | Draft (status `rejected`) | The user said "hayır" or `POST /v1/drafts/{id}/reject` |
+| `draft.duplicate` | `previous_draft_id`, `capability` | A document that was already recorded was sent again; no new draft is created |
+| `anomaly.detected` | `capability`, `counterparty`, `amount`, `warnings[]`, `at` | Amount far above the counterparty's median, or a same-amount repeat within a week; the draft always asks for approval |
+| `message.handled` | `message_id`, `channel`, `actor_id`, `intents[]` | Every handled message (analytics) |
+| `deletion.completed` | `id`, `removed` | A data deletion request finished |
+
+### Draft object
+
+```json
+{
+  "id": "drf_…", "company_id": "demo", "actor_id": "u-acc", "capability": "record_expense",
+  "status": "pending", "summary": "Kırtasiye Dünyası · gider · 1.180,00 TL (KDV 196,67)",
+  "payload": { "kind": "expense", "vendor": "Kırtasiye Dünyası", "vendor_tax_id": "1234567890",
+               "document_no": "KRT2026000004512", "amount": 118000, "vat": 19667, "lines": [ … ] },
+  "external_id": "", "channel": "telegram", "sender": "100000002",
+  "created_at": "…", "updated_at": "…"
+}
+```
+
+## Delivery and security
+
+| Property | Value |
+|---|---|
+| Method | `POST`, JSON body = envelope |
+| Headers | `X-Ledgerbot-Event`, `X-Ledgerbot-Delivery`, `X-Ledgerbot-Signature` |
+| Signature | `t=<unix>,v1=<hex HMAC-SHA256(secret, t + "." + body)>`, verify within ±5 min |
+| Timeout | 10 s |
+| Retries | Up to 12 attempts with exponential backoff on non-`2xx` or network errors |
+| Stop | Answer `410 Gone` |
+| Guarantee | At least once; not ordered across drafts |
+
+Code to verify signatures: [Receiving webhooks](/docs/integration/receiving-webhooks).

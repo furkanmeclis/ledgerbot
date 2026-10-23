@@ -1,0 +1,48 @@
+---
+title: Capabilities
+description: What the assistant can do, and the names used in the permission matrix.
+icon: Sparkles
+---
+
+Capabilities are the unit of permission. Grant them by name or glob in the
+[permission matrix](/docs/integration/permissions). `GET /v1/capabilities` returns the live list
+with the roles allowed to use each one.
+
+## Write capabilities
+
+These create drafts and follow the [save mode](/docs/assistant/save-modes).
+
+| Name | Example message | Record |
+|---|---|---|
+| `record_collection` | "Ahmet Yılmaz'dan 5.000 TL havale tahsilat" | `collection` with invoice allocations |
+| `record_payment` | "Demir Ltd'ye 12.500 TL ödeme yaptım" | `payment` |
+| `record_expense` | Photo / PDF of a receipt, or a UBL-TR e-invoice XML | `expense` with lines and VAT |
+| `create_order` | "Yıldız Market'e 10 koli A4 kağıt siparişi" | `order` with product lines |
+| `import_bank_statement` | A bank statement (CSV, Excel, PDF) | `batch` of matched movements |
+| `repeat_last` | "her zamanki gibi", "her zamanki gibi 3.000" | Same kind as the user's last record |
+
+## Read capabilities
+
+| Name | Example |
+|---|---|
+| `query_balance` | "Ahmet Yılmaz bakiyesi" |
+| `send_statement` | "Ahmet Yılmaz ekstresi" |
+| `query_stock` | "A4 kağıt stok" |
+| `query_low_stock` | "kritik stoklar" |
+| `query_overdue` | "vadesi geçenler" |
+| `daily_summary` | "bugün ne sattık" |
+| `query_report` | "haftalık rapor", "KDV tahmini" |
+| `cash_forecast` | "nakit akışı" |
+| `search_knowledge` | "notlarda kargo ara", "kayıtlarda toner ara" |
+| `add_note` | "not al: Yıldız Market her ay 5'inde öder" |
+| `help` | "ne yapabilirsin" |
+
+## Plugins
+
+Company-specific capabilities (`x_…`) declared in the settings are listed and permissioned the
+same way. See [Plugins](/docs/integration/settings#plugins).
+
+## Chained commands
+
+"Ahmet'ten 5.000 tahsilat **ve** bakiyesini göster" runs both capabilities in order, each with its
+own permission check and save mode.

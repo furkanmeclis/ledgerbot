@@ -1,0 +1,63 @@
+---
+title: Deployment
+description: Processes, Docker Compose, scaling to thousands of companies, and production checklist.
+icon: Server
+---
+
+## Processes
+
+One Go binary, several roles:
+
+| Command | Role | Scaling |
+|---|---|---|
+| `ledgerbot migrate` | Applies database migrations, then exits | Once per release |
+| `ledgerbot api` | Stateless HTTP: `/v1`, channel webhooks, health, metrics | Horizontally, behind any load balancer |
+| `ledgerbot worker` | Jobs: assistant, outbound messages, events, webhooks, listeners, reports, deletion, simulator | Identical replicas, no leader; periodic jobs use River leader election |
+| `ledgerbot all` | api + worker in one process | Small installs and development |
+
+Everything shares one PostgreSQL 17 database with pgvector. The queue is River on PostgreSQL
+(`FOR UPDATE SKIP LOCKED`); there is no Redis or broker.
+
+## Docker Compose
+
+```bash
+cp .env.example .env            # set LEDGERBOT_SECRET_KEY, LEDGERBOT_ADMIN_TOKEN, LEDGERBOT_DEV=false
+docker compose up -d --build    # postgres, migrate, 2× api, 3× worker, gateway on :8080
+docker compose up -d --scale api=4 --scale worker=6
+```
+
+The `gateway` service (Caddy) round-robins over the API replicas on `LEDGERBOT_PORT` (default
+8080). Put TLS termination in front of it and set `LEDGERBOT_PUBLIC_URL` to the public HTTPS URL —
+channel webhook URLs are built from it.
+
+Optional tracing UI: `docker compose --profile observability up -d` adds Jaeger on `:16686`
+(set `OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318`).
+
+## Scaling
+
+- **api** is stateless; add replicas.
+- **worker** replicas share queues. Separate queues for inbound AI work, outbound sends, events,
+  webhooks and maintenance mean a slow AI provider never blocks deliveries.
+- **Fairness**: if a company already has `LEDGERBOT_PER_COMPANY_INFLIGHT` jobs running in a worker,
+  its next job is snoozed for 250 ms, so one busy company cannot starve the others.
+- **Listeners** (Telegram polling, IMAP) are leased with a 20 s TTL and move to another worker if
+  one dies.
+- **Dead letters**: jobs that exhaust retries are `discarded`; list them with
+  `GET /admin/jobs?state=discarded` (admin token).
+
+A k6 load test with 4,000 generated companies on one 8-core laptop ran at ~1,600 req/s with 0 %
+errors and ~96 ms p95 at 50 virtual users. Details:
+[docs/PERFORMANCE.md](https://github.com/furkanmeclis/ledgerbot/blob/main/docs/PERFORMANCE.md).
+
+## Production checklist
+
+- [ ] `LEDGERBOT_DEV=false` (disables `/v1/dev/*` and the simulator endpoint)
+- [ ] `LEDGERBOT_SECRET_KEY` = 64 hex chars (`openssl rand -hex 32`), stored in a secret manager
+- [ ] `LEDGERBOT_ADMIN_TOKEN` = long random value, not exposed publicly
+- [ ] `LEDGERBOT_PUBLIC_URL` = public HTTPS URL
+- [ ] `LEDGERBOT_TENANT_SOURCE=http` with `LEDGERBOT_HOST_API_URL` and `LEDGERBOT_HOST_API_TOKEN`
+- [ ] Data driver chosen (`api` once the read endpoints exist)
+- [ ] `LEDGERBOT_PROVIDERS_FILE` and provider API keys
+- [ ] PostgreSQL backups; `max_connections` ≥ (api + worker replicas) × `LEDGERBOT_DB_MAX_CONNS`
+- [ ] `/metrics` scraped, `/readyz` used by the load balancer
+- [ ] `LEDGERBOT_META_APP_SECRET` if a Meta WhatsApp app is used (data deletion callback)

@@ -1,0 +1,27 @@
+---
+title: Core concepts
+description: The vocabulary used across the integration documents.
+icon: BookA
+---
+
+| Term | Meaning |
+|---|---|
+| **Host** | The accounting application Ledgerbot assists — here, Easytrade. It owns all accounting data. |
+| **Company** | A tenant (`company_id`). Every setting, user, draft, key and job is scoped to one company. In Easytrade terms this is the `Company` model. |
+| **User / actor** | A person in the [permission matrix](/docs/integration/permissions) (`actor_id`), with a role and channel addresses (phone, Telegram chat id, e-mail). |
+| **Channel** | WhatsApp (WuzAPI per company or central, Meta Cloud API), Telegram, e-mail, `api` (REST) and `dev` (local testing). |
+| **Capability** | One thing the assistant can do: `record_collection`, `query_balance`, `create_order` ... Roles are granted capabilities. See [Capabilities](/docs/assistant/capabilities). |
+| **Intent** | A capability plus raw arguments extracted from a message, by rules first and the LLM as a fallback. |
+| **Draft** | A record the assistant prepared (collection, payment, expense, order, batch). Drafts move through `preview → pending → committed / rejected / failed`. |
+| **Save mode** | What happens to a draft: `reply_only`, `ask_approval` or `auto_save`. See [Save modes](/docs/assistant/save-modes). |
+| **Record** | The payload committed to the host: kind, amounts in kuruş, lines, allocations, `draft_id`. See [Write path](/docs/integration/write-path#the-record-payload). |
+| **Data provider** | The read/write interface to accounting data. `fake` (seed + simulator) today, `api` (host REST) when Easytrade exposes the [host contract](/docs/integration/read-path). |
+| **Event** | A JSON envelope shared by host → Ledgerbot events (`stock.low`, `invoice.overdue` ...) and Ledgerbot → host webhooks (`draft.committed` ...). See [Events](/docs/integration/events). |
+| **Degraded mode** | Settings could not be refreshed; the last snapshot is used and nothing is written. |
+
+## Units
+
+- **Money** is always an integer in **kuruş** (minor units): `512550` is 5.125,50 TL.
+- **Quantities** are integers in **thousandths** of a unit: `2500` is 2,5 pieces (or kg, m ...).
+- **VAT rates** are integer percentages: `20`.
+- **Dates** are RFC 3339 timestamps (`2026-10-23T09:30:00Z`) or `YYYY-MM-DD` where the contract says `date`.

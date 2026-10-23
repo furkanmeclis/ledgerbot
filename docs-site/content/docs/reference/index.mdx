@@ -1,0 +1,18 @@
+---
+title: API reference
+description: Generated from the OpenAPI contracts in the repository.
+---
+
+Two OpenAPI documents describe the integration. The pages in this section are generated from them
+on every build, so they always match `docs/contracts/` in the repository.
+
+<Cards>
+  <Card title="Ledgerbot API" href="/docs/reference/ledgerbot-api" description="What Ledgerbot exposes: /v1, webhooks, health, admin. Source: docs/contracts/ledgerbot.openapi.yaml" />
+  <Card title="Host contract API" href="/docs/reference/host-api" description="What Easytrade implements for Ledgerbot: settings, permissions, identities, data provider. Source: docs/contracts/host.openapi.yaml" />
+  <Card title="Contract schemas" href="/docs/reference/schemas" description="JSON Schemas for settings, the permission matrix and the event envelope." />
+</Cards>
+
+The raw files can be imported into Postman, Insomnia or a code generator:
+
+- [`ledgerbot.openapi.yaml`](https://github.com/furkanmeclis/ledgerbot/blob/main/docs/contracts/ledgerbot.openapi.yaml)
+- [`host.openapi.yaml`](https://github.com/furkanmeclis/ledgerbot/blob/main/docs/contracts/host.openapi.yaml)

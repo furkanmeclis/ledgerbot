@@ -1,0 +1,49 @@
+---
+title: Environments
+description: Production and staging base URLs, and how examples use them.
+icon: Globe
+---
+
+Ledgerbot runs as one deployment per environment. Each environment has two base URLs:
+
+- **Ledgerbot API**: where Easytrade calls the [REST API](/docs/api) (`/v1/...`) and where channel
+  providers deliver webhooks (`/webhooks/...`).
+- **Host contract**: the base URL on the Easytrade side that Ledgerbot calls for
+  [settings](/docs/integration/settings), the [permission matrix](/docs/integration/permissions) and,
+  once enabled, the [data provider](/docs/integration/read-path) endpoints
+  (`LEDGERBOT_HOST_API_URL`).
+
+<EnvironmentTable />
+
+## Using the examples
+
+Every `curl` example on this site reads the base URL and the API key from shell variables. Copy the
+block for the environment selected in the sidebar:
+
+<EnvExports />
+
+Then, for example:
+
+```bash
+curl -s "$LEDGERBOT_URL/v1/capabilities" -H "Authorization: Bearer $LEDGERBOT_KEY"
+```
+
+<Callout type="warn" title="Production writes are real">
+  With the `api` data driver, or a webhook subscriber that creates records, an approved draft in
+  production becomes a real accounting record. Test on staging with a test company first.
+</Callout>
+
+## Configuring the URLs
+
+The URLs shown here are read at request time from the documentation container, so the same image
+serves any deployment:
+
+| Variable | Shown as |
+|---|---|
+| `DOCS_PROD_URL` | Production Ledgerbot API |
+| `DOCS_STAGE_URL` | Staging Ledgerbot API |
+| `DOCS_PROD_HOST_URL` | Production host contract base (Easytrade) |
+| `DOCS_STAGE_HOST_URL` | Staging host contract base (Easytrade) |
+| `DOCS_PROD_LABEL`, `DOCS_STAGE_LABEL` | Optional display names |
+
+See [Documentation site](/docs/operations/docs-site) for the full list.

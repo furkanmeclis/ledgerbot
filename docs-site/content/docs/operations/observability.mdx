@@ -1,0 +1,49 @@
+---
+title: Observability
+description: Health checks, Prometheus metrics, traces, audit log and AI usage.
+icon: Activity
+---
+
+## Health
+
+| Endpoint | Meaning |
+|---|---|
+| `GET /healthz` | Process is alive (no dependencies) |
+| `GET /readyz` | Database reachable within 2 s; `503 not_ready` otherwise |
+
+The Docker image also has `ledgerbot healthcheck` for container health checks.
+
+## Prometheus metrics (`GET /metrics`)
+
+| Metric | Labels / meaning |
+|---|---|
+| `ledgerbot_http_requests_total` | Requests by route and status class |
+| `ledgerbot_http_request_duration_seconds` | HTTP latency by route |
+| `ledgerbot_messages_total` | Inbound messages by channel and kind |
+| `ledgerbot_handle_duration_seconds` | End-to-end message handling latency |
+| `ledgerbot_ai_calls_total` | AI calls by purpose and provider |
+| `ledgerbot_ai_tokens_total` | AI tokens by direction |
+| `ledgerbot_ai_latency_seconds` | AI provider latency |
+| `ledgerbot_jobs_total` | Worker jobs by kind and outcome |
+| `ledgerbot_jobs_snoozed_total` | Jobs delayed by the per-company fairness limiter |
+| `ledgerbot_channel_leases_held` | Listener leases held by this process |
+| `ledgerbot_webhook_deliveries_total` | Outbound webhook deliveries: `ok`, `rejected`, `error` |
+
+Useful alerts: `rate(ledgerbot_webhook_deliveries_total{outcome!="ok"}[5m])` (Easytrade receiver
+failing), p95 of `ledgerbot_handle_duration_seconds`, and growth of discarded jobs.
+
+## Traces
+
+With `OTEL_EXPORTER_OTLP_ENDPOINT` set, a trace follows a message from the HTTP request through the
+queued job, the assistant, each capability and each AI call.
+
+## Audit log
+
+Every significant step is written to the audit log in batches (COPY): `message.received`,
+`sender.unknown`, `draft.created`, `draft.committed`, `draft.rejected`, `draft.commit_failed`,
+`draft.duplicate` … Read it per company with `GET /v1/audit` (scope `audit`).
+
+## AI usage
+
+`GET /v1/usage?from=&to=` returns calls, tokens and cost per purpose, provider and model, plus
+today's quota usage against `ai_daily_limit`.

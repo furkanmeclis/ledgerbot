@@ -1,0 +1,77 @@
+---
+title: Common workflows
+description: End-to-end request sequences Easytrade is likely to use.
+icon: Workflow
+---
+
+<EnvExports />
+
+## Assistant inside the Easytrade UI
+
+Easytrade can embed a chat box and call Ledgerbot as the signed-in user. `actor_id` must be a user
+in the permission matrix.
+
+```bash
+curl -s "$LEDGERBOT_URL/v1/messages" -H "Authorization: Bearer $LEDGERBOT_KEY" -d '{
+  "actor_id": "u-acc",
+  "text": "Ahmet Yılmaz'\''dan 5.000 TL havale tahsilat"
+}'
+```
+
+```json
+{
+  "data": {
+    "texts": ["Ahmet Yılmaz · tahsilat · 5.000,00 TL · havale\nKaydedeyim mi? (evet / hayır)"],
+    "language": "tr",
+    "drafts": [{ "id": "drf_…", "status": "pending", "capability": "record_collection", "payload": { "kind": "collection", "amount": 500000, "…": "…" } }],
+    "intents": [{ "capability": "record_collection", "args": { "customer": "Ahmet Yılmaz", "amount": "5.000 TL", "method": "havale" }, "source": "rules" }]
+  }
+}
+```
+
+Show `texts` verbatim. If a draft is `pending`, render approve / reject buttons:
+
+```bash
+curl -s "$LEDGERBOT_URL/v1/drafts/drf_…/approve" -H "Authorization: Bearer $LEDGERBOT_KEY" \
+  -H "Idempotency-Key: approve-drf_…" -d '{"actor_id":"u-acc"}'
+```
+
+## Uploading a receipt or e-invoice
+
+```bash
+B64=$(base64 < fatura.xml | tr -d '\n')
+curl -s "$LEDGERBOT_URL/v1/messages" -H "Authorization: Bearer $LEDGERBOT_KEY" -d "{
+  \"actor_id\": \"u-acc\", \"async\": true,
+  \"media\": { \"mime\": \"application/xml\", \"filename\": \"fatura.xml\", \"data\": \"$B64\" }
+}"
+# → 202 {"data":{"message_id":"api_…","status":"queued"}}; the draft arrives as draft.created / draft.committed
+```
+
+## Pending approvals screen
+
+```bash
+curl -s "$LEDGERBOT_URL/v1/drafts?status=pending&limit=50" -H "Authorization: Bearer $LEDGERBOT_KEY"
+```
+
+## Telling Ledgerbot about a change
+
+```bash
+# Roles, phone numbers or prompts changed
+curl -s "$LEDGERBOT_URL/v1/events" -H "Authorization: Bearer $LEDGERBOT_KEY" -d '{"type":"settings.changed"}'
+```
+
+## Usage report for billing
+
+```bash
+curl -s "$LEDGERBOT_URL/v1/usage?from=2026-10-01&to=2026-10-31" -H "Authorization: Bearer $LEDGERBOT_KEY"
+```
+
+## Deleting a person's data (KVKK)
+
+```bash
+curl -s "$LEDGERBOT_URL/v1/deletion-requests" -H "Authorization: Bearer $LEDGERBOT_KEY" \
+  -d '{"channel":"wuzapi","subject":"+905320000002"}'
+```
+
+Drafts of that subject are erased and audit entries mentioning them are redacted;
+`deletion.completed` is emitted when done.

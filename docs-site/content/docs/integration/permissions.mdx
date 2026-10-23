@@ -1,0 +1,97 @@
+---
+title: Permission matrix
+description: Mapping Easytrade roles and users onto Ledgerbot capabilities, channels and save modes.
+icon: ShieldCheck
+---
+
+Ledgerbot enforces a **permission matrix** on every message and API call. Easytrade serves it next
+to the settings:
+
+```http
+GET {LEDGERBOT_HOST_API_URL}/companies/{company}/permissions
+```
+
+It answers three questions: *who is writing* (users and their channel addresses), *what may they do*
+(roles → capabilities), and *how strictly* (per-role save mode and scope).
+
+## Example
+
+```json title="GET /companies/demo/permissions"
+{
+  "company_id": "demo",
+  "version": 3,
+  "roles": {
+    "owner":      { "capabilities": ["*"] },
+    "accountant": { "capabilities": ["*"], "save_mode": "ask_approval" },
+    "sales":      { "capabilities": ["query_*", "create_order", "send_statement", "help"], "scope": "own",
+                    "channels": ["wuzapi", "waba", "telegram"] },
+    "viewer":     { "capabilities": ["query_*", "daily_summary", "help"], "save_mode": "reply_only" }
+  },
+  "users": [
+    { "id": "u-owner", "name": "Furkan", "role": "owner",
+      "addresses": { "wuzapi": "+905320000001", "telegram": "100000001", "email": "owner@demo.local" } },
+    { "id": "u-acc", "name": "Ayşe Muhasebe", "role": "accountant",
+      "addresses": { "wuzapi": "+905320000002", "email": "muhasebe@demo.local" } },
+    { "id": "u-sales", "name": "Emre Satış", "role": "sales",
+      "addresses": { "wuzapi": "+905320000003" } }
+  ]
+}
+```
+
+## Roles
+
+<TypeTable
+  type={{
+    capabilities: { type: 'string[]', description: 'Capability names or globs: "*", "query_*", "record_collection", "x_*" for plugins.', required: true },
+    channels: { type: '("dev" | "telegram" | "wuzapi" | "waba" | "email")[]', description: 'Channels this role may use. Empty = all. REST API calls (/v1/messages, approvals) are not restricted by channel.' },
+    save_mode: { type: '"reply_only" | "ask_approval" | "auto_save"', description: 'Can only make the company save mode stricter, never looser.' },
+    scope: { type: '"all" | "own"', description: 'own: the role can only approve, reject and see its own drafts.' },
+  }}
+/>
+
+## Users
+
+<TypeTable
+  type={{
+    id: { type: 'string', description: 'Stable user id. Use the Easytrade user id; it appears as actor_id in drafts, audit entries and webhooks.', required: true },
+    role: { type: 'string', description: 'A key of roles.', required: true },
+    name: { type: 'string', description: 'Display name used in replies and reports.' },
+    addresses: { type: 'object', description: 'Channel address per kind: wuzapi / waba (E.164 phone, shared between both), telegram (chat id), email, dev.', required: true },
+  }}
+/>
+
+A message from an address that is not in the matrix gets a short "you are not registered" reply
+and a `sender.unknown` audit entry; nothing else happens.
+
+## Mapping Easytrade roles
+
+Easytrade uses Spatie Permission roles per company. Keep the Ledgerbot matrix a **projection** of
+those roles rather than a second permission system:
+
+| Easytrade role (example) | Ledgerbot role | Capabilities | Save mode |
+|---|---|---|---|
+| Company owner / admin | `owner` | `*` | company default |
+| Accountant | `accountant` | `*` | `ask_approval` |
+| Sales representative (B2B) | `sales` | `query_*`, `create_order`, `send_statement`, `help` (scope `own`) | company default |
+| Read-only / auditor | `viewer` | `query_*`, `daily_summary`, `help` | `reply_only` |
+
+Tips:
+
+- Generate the matrix from Easytrade on request; it is cached for `LEDGERBOT_TENANT_TTL` and you
+  can push `settings.changed` after a role or phone number change.
+- Only include users who opted in to the assistant, and only the addresses they verified.
+- Use `scope: "own"` for field roles so they cannot approve someone else's draft.
+- Start pilots with `ask_approval` everywhere; loosen to `auto_save` per role once trusted.
+
+## How a decision is made
+
+1. Resolve the sender: channel + address → user (or, on a [central number](/docs/integration/channels#central-numbers-and-identity-routing),
+   the user's selected company first).
+2. Parse intents. For each intent, check `role.channels` and `role.capabilities`.
+3. Run the capability. Read capabilities answer immediately.
+4. For write capabilities, compute the effective save mode: company `save_mode`, made stricter by
+   the role's `save_mode`, forced to `ask_approval` when the record looks anomalous, and forced to
+   `reply_only` in degraded mode.
+
+The capability names are listed in [Capabilities](/docs/assistant/capabilities) and live at
+`GET /v1/capabilities`, which also shows which roles may use each one.

@@ -1,0 +1,98 @@
+---
+title: Read path
+description: The data provider contract — how Ledgerbot reads customers, balances, invoices, stock, summaries and cash.
+icon: BookOpen
+---
+
+Every answer the assistant gives ("Ahmet Yılmaz'ın bakiyesi?", "kritik stoklar", "bu haftanın
+kârı", "nakit akışı") comes from the **data provider**. The assistant only talks to this interface
+and does not know where the data lives.
+
+| Driver | `LEDGERBOT_DATA_DRIVER` | Source | Status |
+|---|---|---|---|
+| Fake + simulator | `fake` | Deterministic seed data per company plus Ledgerbot's own ledger table; the simulator produces sales, stock and overdue events | Implemented (default) |
+| Host API | `api` | The host contract endpoints below, on `LEDGERBOT_HOST_API_URL` | Implemented |
+| Read-only database | — | A read-only replica or SQL views of the host database | Planned |
+
+## Phase 1: fake data and the simulator
+
+The `fake` driver lets the whole product run before any Easytrade endpoint exists: demos,
+evaluation of the language understanding, load tests with 4,000 companies, and building the
+webhook receiver. `LEDGERBOT_SIMULATE_EVERY=30s` generates sales, low stock and overdue invoices
+continuously; `POST /v1/simulator/run` runs one round on demand (dev mode).
+
+## Phase 2: the host API (`api` driver)
+
+Set:
+
+```bash
+LEDGERBOT_DATA_DRIVER=api
+LEDGERBOT_HOST_API_URL=https://app.easytrade.example/ledgerbot   # no trailing slash
+LEDGERBOT_HOST_API_TOKEN=<long random token>
+```
+
+Ledgerbot then calls these endpoints with `Authorization: Bearer <token>` and a 10 second
+timeout. Current host base URL for the selected environment: <BaseUrl kind="host" />.
+
+| Method & path | Used for | Returns |
+|---|---|---|
+| `GET /companies/{company}/customers?q=&limit=` | Resolving "Ahmet Yılmaz" to a customer | `[{id, name, phone?, email?}]` |
+| `GET /companies/{company}/customers/{id}/balance` | Balance questions, statements | `{customer_id, balance, overdue, as_of}` |
+| `GET /companies/{company}/customers/{id}/invoices/open` | Matching collections to invoices | `[{customer_id, invoice_no, amount, due_date}]`, oldest due first |
+| `GET /companies/{company}/receivables/overdue?limit=` | "vadesi geçenler" | `[{customer_id, customer_name, invoice_no, amount, due_date}]` |
+| `GET /companies/{company}/products?q=&low_stock=` | Stock questions, order lines | `[{id, sku, name, unit, price, vat_rate, stock, min_stock}]` |
+| `GET /companies/{company}/summary?day=` or `?from=&to=` | Daily digest, weekly P&L, monthly VAT | `{sales, collections, payments, expenses, output_vat, input_vat, orders}` |
+| `GET /companies/{company}/cash` | Cash position | `{balance}` |
+| `GET /companies/{company}/cash/upcoming?until=` | 30-day cash forecast | `[{date, amount, description}]` (+ receivable, − payable) |
+| `POST /companies/{company}/records` | Committing a draft ([write path option 2a](/docs/integration/write-path#2a-host-contract-endpoint-implemented)) | `{external_id}` |
+
+The full schemas are in the [host API reference](/docs/reference/host-api). A `404` is read as
+"not found" (for example an unknown customer id); any other non-`2xx` status is an error and the
+user gets a short failure message instead of an invented answer.
+
+### Conventions
+
+- **Money**: integer kuruş. `balance` is positive when the customer owes the company.
+- **Quantities**: integer thousandths (`stock: 12500` = 12,5).
+- **Dates**: `due_date`, `day`, `from`, `to`, `until` are `YYYY-MM-DD`; `to` is exclusive.
+- **Search**: `q` is what the user typed ("ahmet yilmaz", "A4 kağıt"). Match case- and
+  accent-insensitively on name, code and tax number, and return the best matches first; Ledgerbot
+  asks the user to choose when several match.
+- **Company scope**: every path starts with the company id. The endpoint must never return data
+  of another company, whatever the token.
+
+### Implementing it in Easytrade
+
+A small, read-only controller group behind its own guard is enough:
+
+```php title="routes/api.php"
+Route::prefix('ledgerbot/companies/{company}')
+    ->middleware(['ledgerbot.token', 'throttle:600,1'])
+    ->group(function () {
+        Route::get('customers', [LedgerbotReadController::class, 'customers']);
+        Route::get('customers/{id}/balance', [LedgerbotReadController::class, 'balance']);
+        Route::get('customers/{id}/invoices/open', [LedgerbotReadController::class, 'openInvoices']);
+        Route::get('receivables/overdue', [LedgerbotReadController::class, 'overdue']);
+        Route::get('products', [LedgerbotReadController::class, 'products']);
+        Route::get('summary', [LedgerbotReadController::class, 'summary']);
+        Route::get('cash', [LedgerbotReadController::class, 'cash']);
+        Route::get('cash/upcoming', [LedgerbotReadController::class, 'upcoming']);
+    });
+```
+
+Reuse the queries behind the existing cari, stock and report screens so numbers match what users
+see in Easytrade. Each endpoint should answer in well under a second; add indexes for
+`(company_id, name)` searches and open-invoice lookups if they are missing.
+
+<Callout title="Performance">
+  The assistant makes one to three read calls per message. With thousands of companies, keep
+  these endpoints free of N+1 queries and avoid loading Eloquent models for list endpoints —
+  select only the returned columns.
+</Callout>
+
+## Phase 3 (planned): read-only database
+
+For teams that prefer not to build endpoints, a driver reading a **read-only** replica or a set of
+SQL views is planned. Ledgerbot would still never write to the database; writes keep going
+through the [write path](/docs/integration/write-path). The views would mirror the endpoint
+shapes above, so switching between `api` and a database driver is a configuration change.

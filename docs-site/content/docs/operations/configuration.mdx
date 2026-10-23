@@ -1,0 +1,59 @@
+---
+title: Configuration reference
+description: Every environment variable Ledgerbot reads.
+icon: Settings
+---
+
+Ledgerbot is configured through the environment only (see `.env.example`). Per-company behaviour
+lives in the [settings contract](/docs/integration/settings), not here.
+
+## Core
+
+| Variable | Default | Description |
+|---|---|---|
+| `LEDGERBOT_HTTP_ADDR` | `:8080` | Listen address of the API |
+| `LEDGERBOT_PUBLIC_URL` | `http://localhost:8080` | Public base URL; used to build channel webhook URLs |
+| `LEDGERBOT_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
+| `LEDGERBOT_SECRET_KEY` | — | 64 hex chars; encrypts channel credentials. Required unless dev mode |
+| `LEDGERBOT_ADMIN_TOKEN` | — | Bearer token for `/admin/*` |
+| `LEDGERBOT_DEV` | `false` | Enables `/v1/dev/*`, `/v1/simulator/run`, and allows an empty secret key |
+
+## Database
+
+| Variable | Default | Description |
+|---|---|---|
+| `LEDGERBOT_DATABASE_URL` | `postgres://ledgerbot:ledgerbot@localhost:5432/ledgerbot?sslmode=disable` | PostgreSQL 17 with pgvector |
+| `LEDGERBOT_DB_MAX_CONNS` | `40` | Pool size per process (1–1000) |
+
+## Host contracts
+
+| Variable | Default | Description |
+|---|---|---|
+| `LEDGERBOT_TENANT_SOURCE` | `file` | `file` reads `LEDGERBOT_SEED_DIR`; `http` calls the host |
+| `LEDGERBOT_SEED_DIR` | `seed/companies` | One JSON file per company: `{settings, permissions}` |
+| `LEDGERBOT_HOST_API_URL` | — | Host contract base URL (required with `http`) |
+| `LEDGERBOT_HOST_API_TOKEN` | — | Bearer token Ledgerbot sends to the host |
+| `LEDGERBOT_TENANT_TTL` | `30s` | Settings and matrix cache lifetime |
+| `LEDGERBOT_DATA_DRIVER` | `fake` | `fake` or `api` |
+| `LEDGERBOT_SIMULATE_EVERY` | `0` | Run the event simulator every N (e.g. `30s`); 0 disables |
+
+## AI, FX, Meta, tracing
+
+| Variable | Default | Description |
+|---|---|---|
+| `LEDGERBOT_PROVIDERS_FILE` | — | Provider profiles JSON; empty = offline fake providers |
+| `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, … | — | Referenced by `api_key_env` in the providers file |
+| `LEDGERBOT_FX_SOURCE` | `tcmb` | `tcmb` (Central Bank daily XML) or `static` |
+| `LEDGERBOT_META_APP_SECRET` | — | Verifies Meta data deletion callbacks |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | — | OTLP/HTTP endpoint; enables tracing |
+| `LEDGERBOT_TRACE_RATIO` | `1` | Trace sampling ratio |
+
+## Scaling
+
+| Variable | Default | Description |
+|---|---|---|
+| `LEDGERBOT_WORKER_CONCURRENCY` | `64` | Max concurrent jobs per queue per worker |
+| `LEDGERBOT_PER_COMPANY_INFLIGHT` | `4` | Fairness cap per company per worker |
+| `LEDGERBOT_MAX_LISTENERS` | `1000` | Max leased listeners per worker |
+| `LEDGERBOT_RATE_RPS` | `20` | Per-company REST rate per API replica |
+| `LEDGERBOT_RATE_BURST` | `40` | Burst size |
