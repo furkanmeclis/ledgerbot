@@ -88,6 +88,12 @@ cd docs-site && cp .env.example .env    # set DOCS_PASSWORD, DOCS_PROD_URL, DOCS
 docker compose up -d --build            # http://localhost:3001
 ```
 
+## Deploying on Dokploy
+
+`deploy/dokploy/compose.yml` runs the whole stack (API replicas, workers, PostgreSQL, and the demo console,
+docs site, Prometheus/Grafana/Jaeger and WuzAPI as compose profiles) as one Dokploy compose service.
+Start from `deploy/dokploy/env.example`; the steps are in the docs site under Operations → Deploying on Dokploy.
+
 ## Contracts
 
 | Contract | File |

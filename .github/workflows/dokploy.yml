@@ -1,0 +1,67 @@
+name: Dokploy compose
+
+# Boots deploy/dokploy/compose.yml with every profile, the way Dokploy runs it
+# (docker compose -p <app> up -d --build), and checks each service.
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/**', 'Dockerfile', 'dashboard/**', 'docs-site/**', 'internal/**', 'cmd/**', 'migrations/**', 'seed/**', 'go.mod', 'go.sum', '.github/workflows/dokploy.yml']
+  pull_request:
+    paths: ['deploy/**', 'Dockerfile', 'dashboard/**', 'docs-site/**', 'internal/**', 'cmd/**', 'migrations/**', 'seed/**', 'go.mod', 'go.sum', '.github/workflows/dokploy.yml']
+  workflow_dispatch:
+
+concurrency:
+  group: dokploy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  boot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: deploy/dokploy
+    env:
+      P: lbci
+    steps:
+      - uses: actions/checkout@v4
+      - name: Environment from env.example
+        run: |
+          cp env.example .env
+          sed -i \
+            -e "s/^POSTGRES_PASSWORD=$/POSTGRES_PASSWORD=$(openssl rand -hex 16)/" \
+            -e "s/^LEDGERBOT_SECRET_KEY=$/LEDGERBOT_SECRET_KEY=$(openssl rand -hex 32)/" \
+            -e "s/^LEDGERBOT_ADMIN_TOKEN=$/LEDGERBOT_ADMIN_TOKEN=ci-admin/" \
+            -e "s/^DOCS_PASSWORD=$/DOCS_PASSWORD=ci-password/" \
+            -e "s/^GRAFANA_ADMIN_PASSWORD=$/GRAFANA_ADMIN_PASSWORD=ci-grafana/" \
+            -e "s/^WUZAPI_ADMIN_TOKEN=$/WUZAPI_ADMIN_TOKEN=ci-wuzapi/" \
+            -e "s/^WUZAPI_GLOBAL_ENCRYPTION_KEY=$/WUZAPI_GLOBAL_ENCRYPTION_KEY=$(openssl rand -hex 16)/" \
+            .env
+          docker compose config -q
+      - name: Build and start
+        run: docker compose -p $P up -d --build --wait --wait-timeout 300
+      - name: Check services
+        run: |
+          ip() { docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$P-$1-1"; }
+          BASE_URL=http://$(ip api):8080 ../../scripts/smoke.sh
+          curl -fsS http://$(ip dashboard):3000/api/companies
+          curl -fsS http://$(ip docs):3000/api/health
+          curl -fsS http://$(ip grafana):3000/api/health
+          curl -fsS -H 'Authorization: ci-wuzapi' http://$(ip wuzapi):8080/admin/users >/dev/null
+          # Prometheus sees both api replicas and all three workers.
+          for i in $(seq 1 30); do
+            up=$(curl -fsS http://$(ip prometheus):9090/api/v1/targets | jq '[.data.activeTargets[] | select(.labels.job|startswith("ledgerbot")) | select(.health=="up")] | length')
+            [ "$up" -ge 5 ] && break; sleep 2
+          done
+          echo "ledgerbot targets up: $up"; [ "$up" -ge 5 ]
+          # Traces reach Jaeger.
+          for i in $(seq 1 30); do
+            curl -fsS http://$(ip jaeger):16686/api/services | jq -e '.data | index("ledgerbot-api")' >/dev/null && break; sleep 2
+          done
+          curl -fsS http://$(ip jaeger):16686/api/services | jq -e '.data | index("ledgerbot-api")'
+      - name: Logs
+        if: failure()
+        run: docker compose -p $P logs --tail 200
+      - name: Stop
+        if: always()
+        run: docker compose -p $P down -v

@@ -33,6 +33,8 @@ channel webhook URLs are built from it.
 Optional tracing UI: `docker compose --profile observability up -d` adds Jaeger on `:16686`
 (set `OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318`).
 
+On a Dokploy server, use `deploy/dokploy/compose.yml` instead: see [Deploying on Dokploy](/docs/operations/dokploy).
+
 ## Scaling
 
 - **api** is stateless; add replicas.

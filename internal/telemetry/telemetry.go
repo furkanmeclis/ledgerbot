@@ -32,7 +32,9 @@ func Setup(ctx context.Context, service, version string) (func(context.Context) 
 	if err != nil {
 		return nil, err
 	}
-	res, err := resource.Merge(resource.Default(), resource.NewWithAttributes(semconv.SchemaURL,
+	// Schemaless: resource.Default() follows the SDK's semconv version, and two
+	// different schema URLs make Merge fail.
+	res, err := resource.Merge(resource.Default(), resource.NewSchemaless(
 		semconv.ServiceName(service), semconv.ServiceVersion(version)))
 	if err != nil {
 		return nil, err
